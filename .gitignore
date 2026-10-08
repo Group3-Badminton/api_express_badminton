@@ -1,0 +1,11 @@
+# Bỏ qua thư mục thư viện node_modules (nặng nhất)
+node_modules/
+
+# Bỏ qua file chứa mật khẩu & key kết nối Database
+.env
+
+# Bỏ qua các file log lỗi
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
