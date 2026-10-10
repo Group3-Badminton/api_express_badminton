@@ -28,8 +28,16 @@ const userSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['ACTIVE', 'INACTIVE', 'LOCKED'],
+        enum: ['ACTIVE', 'INACTIVE', 'LOCKED', 'PENDING_VERIFICATION'],
         default: 'ACTIVE'
+    },
+    resetOtp: {
+        type: String,
+        default: null
+    },
+    resetOtpExpiry: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 
