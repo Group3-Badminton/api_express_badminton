@@ -397,23 +397,59 @@ exports.createBooking = async (req, res) => {
   try {
     const {
       customerId: bodyCustomerId,
+      customerName,
+      customerPhone,
+      customerEmail,
       courtId,
       bookingDate,
       startTime,
       endTime,
       voucherCode,
       voucherId: bodyVoucherId,
-      paymentMethod = 'VIETQR',
+      price: customPrice,
+      paymentMethod = 'CASH',
       paymentStatus: bodyPaymentStatus,
       status: bodyStatus,
       note = ''
     } = req.body;
 
-    // Xác định khách hàng: Lấy từ token đăng nhập nếu có, hoặc từ body (Admin đặt hộ)
-    const customerId = req.user?.userId || bodyCustomerId;
+    // Xác định khách hàng:
+    let customerId = bodyCustomerId;
+
+    if (req.user && req.user.role === 'CUSTOMER') {
+      customerId = req.user.userId;
+    } else if (!customerId) {
+      if (customerPhone && customerPhone.trim()) {
+        const cleanPhone = customerPhone.trim();
+        let existingUser = await User.findOne({ phone: cleanPhone });
+        if (!existingUser) {
+          const cleanEmail = customerEmail && customerEmail.trim()
+            ? customerEmail.trim().toLowerCase()
+            : null;
+
+          existingUser = await User.create({
+            fullName: customerName?.trim() || 'Khách vãng lai',
+            phone: cleanPhone,
+            email: cleanEmail,
+            password: 'guest_no_login_needed',
+            role: 'CUSTOMER',
+            status: 'ACTIVE'
+          });
+        } else if (existingUser.email && existingUser.email.includes('@badminton.local')) {
+          const cleanEmail = customerEmail && customerEmail.trim()
+            ? customerEmail.trim().toLowerCase()
+            : null;
+          existingUser.email = cleanEmail;
+          await existingUser.save();
+        }
+        customerId = existingUser._id;
+      } else {
+        customerId = req.user?.userId;
+      }
+    }
 
     if (!customerId) {
-      return sendError(res, 'Vui lòng đăng nhập hoặc cung cấp thông tin khách hàng đặt sân!', 400);
+      return sendError(res, 'Vui lòng chọn hoặc cung cấp thông tin khách hàng đặt sân!', 400);
     }
 
     if (!courtId || !bookingDate || !startTime || !endTime) {
@@ -523,9 +559,9 @@ exports.createBooking = async (req, res) => {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const bookingCode = `BK${dateStr}${randomSuffix}`;
 
-    // Xác định trạng thái mặc định
+    // Xác định trạng thái mặc định (Không có thanh toán lúc đặt sân, tất cả đơn đều là chưa thanh toán)
     const finalStatus = bodyStatus || (req.user?.role === 'CUSTOMER' ? 'CONFIRMED' : 'CONFIRMED');
-    const finalPaymentStatus = bodyPaymentStatus || (paymentMethod === 'CASH' ? 'UNPAID' : 'PAID');
+    const finalPaymentStatus = 'UNPAID';
 
     // 7. LƯU ĐƠN ĐẶT SÂN
     const newBooking = await Booking.create({
@@ -660,7 +696,7 @@ exports.updateBookingStatus = async (req, res) => {
 exports.changeBookingInfo = async (req, res) => {
   try {
     const { id } = req.params;
-    const { courtId, bookingDate, startTime, endTime, note, price } = req.body;
+    const { courtId, bookingDate, startTime, endTime, note, price, discount: bodyDiscount, totalAmount: bodyTotalAmount, paymentMethod } = req.body;
 
     // E1: Không tìm thấy yêu cầu đặt sân (Booking does not exist)
     const booking = await Booking.findById(id);
@@ -718,7 +754,7 @@ exports.changeBookingInfo = async (req, res) => {
       );
     }
 
-    // Tính toán lại giá tiền từ bảng giá (Price) theo sân và khung giờ mới
+    // Tính toán lại giá tiền từ bảng giá (Price) theo sân và khung giờ mới hoặc lấy giá tùy chỉnh
     const dayOfWeek = new Date(targetBookingDate).getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
@@ -731,7 +767,7 @@ exports.changeBookingInfo = async (req, res) => {
       status: 'ACTIVE'
     });
 
-    if (price && Number(price) > 0) {
+    if (price !== undefined && Number(price) >= 0) {
       basePrice = Number(price);
     } else if (priceDoc) {
       basePrice = priceDoc.price;
@@ -739,9 +775,11 @@ exports.changeBookingInfo = async (req, res) => {
       basePrice = isWeekend ? 140000 : 100000;
     }
 
-    // Tính toán lại voucher nếu có
+    // Tính toán lại voucher nếu có hoặc nhận discount gửi lên
     let discount = 0;
-    if (booking.voucherId) {
+    if (bodyDiscount !== undefined && Number(bodyDiscount) >= 0) {
+      discount = Number(bodyDiscount);
+    } else if (booking.voucherId) {
       const voucher = await Voucher.findById(booking.voucherId);
       if (voucher) {
         if (voucher.discountType === 'PERCENTAGE') {
@@ -755,7 +793,10 @@ exports.changeBookingInfo = async (req, res) => {
       }
     }
 
-    const totalAmount = Math.max(0, basePrice - discount);
+    discount = Math.min(discount, basePrice);
+    const totalAmount = bodyTotalAmount !== undefined && Number(bodyTotalAmount) >= 0
+      ? Number(bodyTotalAmount)
+      : Math.max(0, basePrice - discount);
 
     // Cập nhật thông tin đơn
     booking.courtId = targetCourtId;
@@ -765,6 +806,7 @@ exports.changeBookingInfo = async (req, res) => {
     booking.price = basePrice;
     booking.discount = discount;
     booking.totalAmount = totalAmount;
+    if (paymentMethod) booking.paymentMethod = paymentMethod;
     if (typeof note === 'string') booking.note = note;
 
     await booking.save();
@@ -888,5 +930,18 @@ exports.rejectBooking = async (req, res) => {
       'Không thể xử lý yêu cầu đặt sân do lỗi hệ thống. Trạng thái đặt sân chưa được thay đổi. Vui lòng thử lại sau.',
       500
     );
+  }
+};
+
+// 9. Lấy danh sách khách hàng phục vụ staff / admin đặt sân
+exports.getCustomers = async (req, res) => {
+  try {
+    const customers = await User.find({ role: 'CUSTOMER' })
+      .select('fullName phone email address')
+      .sort({ fullName: 1 })
+      .lean();
+    return sendSuccess(res, customers, 'Lấy danh sách khách hàng thành công!', 200);
+  } catch (error) {
+    return sendError(res, error.message, 500);
   }
 };

@@ -379,8 +379,8 @@ async function seedData() {
         discount: 0,
         totalAmount: 120000,
         status: 'PENDING',
-        paymentStatus: 'PAID',
-        paymentMethod: 'VIETQR',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'CASH',
         note: 'Khách đặt online, chờ duyệt sân'
       },
       {
@@ -395,8 +395,8 @@ async function seedData() {
         discount: 30000,
         totalAmount: 120000,
         status: 'CONFIRMED',
-        paymentStatus: 'PAID',
-        paymentMethod: 'TRANSFER',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'CASH',
         note: 'Đã xác nhận đơn đặt, áp dụng voucher GIAM30K'
       },
       {
@@ -411,9 +411,9 @@ async function seedData() {
         discount: 0,
         totalAmount: 90000,
         status: 'CONFIRMED',
-        paymentStatus: 'PAID',
+        paymentStatus: 'UNPAID',
         paymentMethod: 'CASH',
-        note: 'Đã thanh toán tiền mặt tại quầy'
+        note: 'Thanh toán tiền mặt tại quầy khi nhận sân'
       },
       {
         customerId: customer1._id,
@@ -427,8 +427,8 @@ async function seedData() {
         discount: 50000,
         totalAmount: 130000,
         status: 'CONFIRMED',
-        paymentStatus: 'PAID',
-        paymentMethod: 'ONLINE',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'CASH',
         note: 'Đặt sân VIP giao lưu câu lạc bộ'
       },
       {
@@ -445,7 +445,7 @@ async function seedData() {
         status: 'PENDING',
         paymentStatus: 'UNPAID',
         paymentMethod: 'CASH',
-        note: 'Đơn mới, khách chọn thanh toán sau tại sân'
+        note: 'Đơn mới, khách thanh toán tại quầy khi nhận sân'
       },
       {
         customerId: customer3._id,
@@ -459,8 +459,8 @@ async function seedData() {
         discount: 0,
         totalAmount: 120000,
         status: 'COMPLETED',
-        paymentStatus: 'PAID',
-        paymentMethod: 'VIETQR',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'CASH',
         note: 'Buổi chơi hoàn tất đúng giờ'
       },
       {
@@ -475,9 +475,9 @@ async function seedData() {
         discount: 0,
         totalAmount: 130000,
         status: 'CANCELLED',
-        paymentStatus: 'REFUNDED',
-        paymentMethod: 'TRANSFER',
-        note: 'Khách báo bận việc đột xuất trước 6 tiếng, đã hoàn tiền'
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'CASH',
+        note: 'Khách báo bận việc đột xuất trước 6 tiếng'
       }
     ]);
     console.log('📅 Đã tạo thành công danh sách ĐƠN ĐẶT SÂN (BOOKINGS).');

@@ -18,6 +18,9 @@ router.post('/validate-voucher', authMiddleware, bookingController.validateVouch
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
 router.get('/', authMiddleware, bookingController.getAllBookings);
 
+// Danh sách khách hàng phục vụ nhân viên đặt sân
+router.get('/customers', authMiddleware, bookingController.getCustomers);
+
 // 6. Lấy chi tiết đơn đặt sân theo ID
 router.get('/:id', authMiddleware, bookingController.getBookingById);
 
