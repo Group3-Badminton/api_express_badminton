@@ -1,36 +1,31 @@
 const mongoose = require('mongoose');
 
 const courtSchema = new mongoose.Schema({
-  name: {
+  courtName: {
     type: String,
     required: true,
-    trim: true,
-    maxlength: 100
+    trim: true
   },
-  status: {
+  courtType: {
     type: String,
-    enum: ['ACTIVE', 'INACTIVE'],
-    default: 'ACTIVE'
+    default: 'Sân Thảm Tiêu Chuẩn',
+    trim: true
+  },
+  location: {
+    type: String,
+    default: 'Khu vực A',
+    trim: true
   },
   description: {
     type: String,
-    trim: true,
-    maxlength: 500,
-    default: ''
+    default: '',
+    trim: true
   },
-  openingTime: {
+  status: {
     type: String,
-    default: '05:00',
-    match: /^([01]\d|2[0-3]):([0-5]\d)$/
-  },
-  closingTime: {
-    type: String,
-    default: '23:00',
-    match: /^([01]\d|2[0-3]):([0-5]\d)$/
+    enum: ['ACTIVE', 'INACTIVE', 'MAINTENANCE'],
+    default: 'ACTIVE'
   }
 }, { timestamps: true });
-
-// Tên sân độc nhất (không phân biệt chữ hoa thường)
-courtSchema.index({ name: 1 }, { unique: true, collation: { locale: 'vi', strength: 2 } });
 
 module.exports = mongoose.model('Court', courtSchema, 'Court');
