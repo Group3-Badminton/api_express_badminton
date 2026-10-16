@@ -13,7 +13,7 @@ const timeToMinutes = (timeStr) => {
 // UC-18.1: View Price - Lấy danh sách quy tắc giá thuê sân
 exports.getAllPriceRules = async (req, res) => {
   try {
-    const { courtType, status, search } = req.query;
+    const { courtType, status, search, dayOfWeek } = req.query;
     const filter = {};
 
     if (courtType && courtType !== 'ALL_TYPES') {
@@ -22,6 +22,10 @@ exports.getAllPriceRules = async (req, res) => {
 
     if (status && status !== 'ALL_STATUS') {
       filter.status = status;
+    }
+
+    if (dayOfWeek !== undefined && dayOfWeek !== '' && dayOfWeek !== 'ALL_DAYS') {
+      filter.daysOfWeek = Number(dayOfWeek);
     }
 
     if (search && search.trim()) {
