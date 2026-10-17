@@ -494,25 +494,28 @@ exports.createBooking = async (req, res) => {
       );
     }
 
-    // 4. TÍNH GIÁ TIỀN TỰ ĐỘNG TỪ BẢNG GIÁ (PRICE)
+    // 4. TÍNH GIÁ TIỀN TỰ ĐỘNG THEO KHUNG GIỜ VÀ SÂN (Đồng nhất 1 giá, không để lệch nhau)
     const dayOfWeek = bookingDateObj.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
 
-    let basePrice = req.body.price ? Number(req.body.price) : 0;
-    if (!basePrice) {
-      const priceDoc = await Price.findOne({
-        courtId,
-        dayType,
-        timeSlot: { $regex: startTime },
-        status: 'ACTIVE'
-      });
+    let basePrice = 0;
+    const priceDoc = await Price.findOne({
+      courtId,
+      dayType,
+      $or: [
+        { timeSlot: { $regex: startTime } },
+        { timeSlot: '' }
+      ],
+      status: 'ACTIVE'
+    });
 
-      if (priceDoc) {
-        basePrice = priceDoc.price;
-      } else {
-        basePrice = isWeekend ? 140000 : 100000;
-      }
+    if (priceDoc) {
+      basePrice = priceDoc.price;
+    } else if (req.body.price && Number(req.body.price) > 0) {
+      basePrice = Number(req.body.price);
+    } else {
+      basePrice = isWeekend ? 140000 : 100000;
     }
 
     // 5. XỬ LÝ VOUCHER & GIẢM GIÁ
@@ -575,7 +578,7 @@ exports.createBooking = async (req, res) => {
       price: basePrice,
       discount,
       totalAmount,
-      paymentMethod: paymentMethod || 'CASH',
+      paymentMethod: paymentMethod === 'VIETQR' ? 'CASH' : (paymentMethod || 'CASH'),
       paymentStatus: finalPaymentStatus,
       status: finalStatus,
       note
@@ -763,7 +766,10 @@ exports.changeBookingInfo = async (req, res) => {
     const priceDoc = await Price.findOne({
       courtId: targetCourtId,
       dayType,
-      timeSlot: { $regex: targetStartTime },
+      $or: [
+        { timeSlot: { $regex: targetStartTime } },
+        { timeSlot: '' }
+      ],
       status: 'ACTIVE'
     });
 
@@ -806,7 +812,9 @@ exports.changeBookingInfo = async (req, res) => {
     booking.price = basePrice;
     booking.discount = discount;
     booking.totalAmount = totalAmount;
-    if (paymentMethod) booking.paymentMethod = paymentMethod;
+    if (paymentMethod) {
+      booking.paymentMethod = paymentMethod === 'VIETQR' ? 'CASH' : paymentMethod;
+    }
     if (typeof note === 'string') booking.note = note;
     booking.status = 'CONFIRMED';
 

@@ -2,18 +2,19 @@ const express = require('express');
 const router = express.Router();
 const bookingController = require('../controllers/bookingController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const optionalAuth = require('../middlewares/optionalAuthMiddleware');
 
-// 1. Danh sách sân phục vụ bộ lọc và trang đặt sân
-router.get('/courts', authMiddleware, bookingController.getCourts);
+// 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
+router.get('/courts', optionalAuth, bookingController.getCourts);
 
-// 2. Danh sách khung giờ cố định
-router.get('/time-slots', authMiddleware, bookingController.getTimeSlots);
+// 2. Danh sách khung giờ cố định (cho phép xem công khai)
+router.get('/time-slots', optionalAuth, bookingController.getTimeSlots);
 
-// 3. Kiểm tra tình trạng khung giờ còn trống & Bảng giá theo Sân và Ngày
-router.get('/availability', authMiddleware, bookingController.getCourtAvailability);
+// 3. Kiểm tra tình trạng khung giờ còn trống & Bảng giá theo Sân và Ngày (cho phép xem công khai)
+router.get('/availability', optionalAuth, bookingController.getCourtAvailability);
 
 // 4. Kiểm tra và áp dụng mã giảm giá (Voucher)
-router.post('/validate-voucher', authMiddleware, bookingController.validateVoucher);
+router.post('/validate-voucher', optionalAuth, bookingController.validateVoucher);
 
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
 router.get('/', authMiddleware, bookingController.getAllBookings);
@@ -33,7 +34,7 @@ router.patch('/:id/change-info', authMiddleware, bookingController.changeBooking
 // AF2: Từ chối yêu cầu đặt sân (Reject Booking)
 router.patch('/:id/reject', authMiddleware, bookingController.rejectBooking);
 
-// 8. Tạo mới đơn đặt sân
-router.post('/', authMiddleware, bookingController.createBooking);
+// 8. Tạo mới đơn đặt sân (hỗ trợ cả khách đăng nhập lẫn khách vãng lai)
+router.post('/', optionalAuth, bookingController.createBooking);
 
 module.exports = router;
