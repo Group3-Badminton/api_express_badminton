@@ -531,7 +531,7 @@ exports.createBooking = async (req, res) => {
       if (voucher) {
         const now = new Date();
         const isValidDate = (!voucher.startDate || now >= new Date(voucher.startDate)) &&
-                            (!voucher.endDate || now <= new Date(voucher.endDate));
+          (!voucher.endDate || now <= new Date(voucher.endDate));
         const hasLimit = voucher.usageLimit <= 0 || voucher.usedCount < voucher.usageLimit;
         const meetsMinOrder = !voucher.minOrderAmount || basePrice >= voucher.minOrderAmount;
 
@@ -575,7 +575,7 @@ exports.createBooking = async (req, res) => {
       price: basePrice,
       discount,
       totalAmount,
-      paymentMethod,
+      paymentMethod: paymentMethod || 'CASH',
       paymentStatus: finalPaymentStatus,
       status: finalStatus,
       note
@@ -671,8 +671,8 @@ exports.updateBookingStatus = async (req, res) => {
             status === 'CONFIRMED'
               ? `Đơn đặt sân #${booking.bookingCode} đã được nhân viên duyệt thành công.`
               : status === 'REJECTED'
-              ? `Đơn đặt sân #${booking.bookingCode} đã bị từ chối.`
-              : `Đơn đặt sân #${booking.bookingCode} đã bị hủy.`,
+                ? `Đơn đặt sân #${booking.bookingCode} đã bị từ chối.`
+                : `Đơn đặt sân #${booking.bookingCode} đã bị hủy.`,
           isRead: false
         });
       }
@@ -798,7 +798,7 @@ exports.changeBookingInfo = async (req, res) => {
       ? Number(bodyTotalAmount)
       : Math.max(0, basePrice - discount);
 
-    // Cập nhật thông tin đơn
+    // Cập nhật thông tin đơn và xác nhận đơn đặt sân luôn cho khách hàng
     booking.courtId = targetCourtId;
     booking.bookingDate = targetBookingDate;
     booking.startTime = targetStartTime;
@@ -808,6 +808,7 @@ exports.changeBookingInfo = async (req, res) => {
     booking.totalAmount = totalAmount;
     if (paymentMethod) booking.paymentMethod = paymentMethod;
     if (typeof note === 'string') booking.note = note;
+    booking.status = 'CONFIRMED';
 
     await booking.save();
 
@@ -817,9 +818,9 @@ exports.changeBookingInfo = async (req, res) => {
       await Notification.create({
         recipientId: booking.customerId,
         recipientType: 'CUSTOMER',
-        type: 'BOOKING_UPDATED',
-        title: 'Thông tin đặt sân đã được cập nhật',
-        message: `Đơn đặt sân #${booking.bookingCode} đã được cập nhật sang sân ${court.courtName}, ngày ${new Date(targetBookingDate).toLocaleDateString('vi-VN')}, khung giờ ${targetStartTime} - ${targetEndTime}.`,
+        type: 'BOOKING_CONFIRMED',
+        title: 'Đơn đặt sân đã được xác nhận',
+        message: `Đơn đặt sân #${booking.bookingCode} đã được cập nhật sang sân ${court.courtName}, ngày ${new Date(targetBookingDate).toLocaleDateString('vi-VN')}, khung giờ ${targetStartTime} - ${targetEndTime} và đã được xác nhận thành công.`,
         isRead: false
       });
     } catch (notifErr) {
@@ -836,12 +837,12 @@ exports.changeBookingInfo = async (req, res) => {
       return sendSuccess(
         res,
         updatedBooking,
-        'Yêu cầu đặt sân đã được xử lý thành công, nhưng không thể gửi thông báo.',
+        'Yêu cầu đặt sân đã được xử lý và xác nhận thành công, nhưng không thể gửi thông báo.',
         200
       );
     }
 
-    return sendSuccess(res, updatedBooking, 'Thay đổi thông tin đặt sân thành công!', 200);
+    return sendSuccess(res, updatedBooking, 'Thay đổi thông tin và xác nhận đặt sân thành công!', 200);
   } catch (error) {
     // E5: Lỗi hệ thống trong quá trình xử lý yêu cầu đặt sân
     return sendError(
