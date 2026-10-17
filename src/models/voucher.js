@@ -1,57 +1,83 @@
 const mongoose = require('mongoose');
 
-const voucherSchema = new mongoose.Schema({
-  voucherCode: {
-    type: String,
-    required: true,
-    unique: true,
-    uppercase: true,
-    trim: true
+const voucherSchema = new mongoose.Schema(
+  {
+    code: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      uppercase: true,
+      maxlength: 50
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 200
+    },
+    discountType: {
+      type: String,
+      enum: ['PERCENTAGE', 'FIXED_AMOUNT'],
+      default: 'PERCENTAGE',
+      required: true
+    },
+    discountValue: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    maxDiscountAmount: {
+      type: Number,
+      default: null,
+      min: 0
+    },
+    minInvoiceAmount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    startDate: {
+      type: Date,
+      required: true
+    },
+    endDate: {
+      type: Date,
+      required: true
+    },
+    usageLimit: {
+      type: Number,
+      default: null,
+      min: 1
+    },
+    usedCount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+    status: {
+      type: String,
+      enum: ['ACTIVE', 'INACTIVE'],
+      default: 'ACTIVE'
+    },
+    description: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 1000
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
   },
-  voucherName: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  discountType: {
-    type: String,
-    enum: ['PERCENTAGE', 'FIXED'],
-    default: 'FIXED'
-  },
-  discountValue: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  maxDiscount: {
-    type: Number,
-    default: 0
-  },
-  minOrderAmount: {
-    type: Number,
-    default: 0
-  },
-  usageLimit: {
-    type: Number,
-    default: 100
-  },
-  usedCount: {
-    type: Number,
-    default: 0
-  },
-  startDate: {
-    type: Date,
-    default: Date.now
-  },
-  endDate: {
-    type: Date,
-    required: true
-  },
-  status: {
-    type: String,
-    enum: ['ACTIVE', 'EXPIRED', 'INACTIVE'],
-    default: 'ACTIVE'
+  {
+    timestamps: true
   }
-}, { timestamps: true });
+);
+
+voucherSchema.index({ status: 1 });
+voucherSchema.index({ startDate: 1, endDate: 1 });
+voucherSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Voucher', voucherSchema, 'Voucher');

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "node --watch ./bin/www",
-    "start": "node --watch ./bin/www"
+    "start": "node --watch ./bin/www",
+    "test": "node test_staff_module.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

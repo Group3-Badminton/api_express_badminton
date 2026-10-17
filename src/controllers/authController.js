@@ -73,15 +73,19 @@ exports.register = async (req, res) => {
     if (!phoneRegex.test(cleanPhone)) {
       return sendError(res, 'Số điện thoại không hợp lệ! Vui lòng nhập đúng số điện thoại (10 chữ số).', 400);
     }
-    // 1. Kiểm tra Email đã được kích hoạt chưa
+    // 1. Kiểm tra Email (chặn nếu tài khoản đã tồn tại và không phải là CUSTOMER đang chờ xác thực OTP)
     const existingUser = await User.findOne({ email: cleanEmail });
-    if (existingUser && existingUser.status === 'ACTIVE') {
-      return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
+    if (existingUser) {
+      if (existingUser.role !== 'CUSTOMER' || existingUser.status !== 'PENDING_VERIFICATION') {
+        return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
+      }
     }
     // 2. Kiểm tra Số điện thoại
     const existingPhone = await User.findOne({ phone: cleanPhone, email: { $ne: cleanEmail } });
-    if (existingPhone && existingPhone.status === 'ACTIVE') {
-      return sendError(res, 'Số điện thoại này đã được sử dụng. Vui lòng chọn số khác!', 400);
+    if (existingPhone) {
+      if (existingPhone.role !== 'CUSTOMER' || existingPhone.status !== 'PENDING_VERIFICATION') {
+        return sendError(res, 'Số điện thoại này đã được sử dụng. Vui lòng chọn số khác!', 400);
+      }
     }
     // 3. Sinh mã OTP và mã hóa mật khẩu
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
