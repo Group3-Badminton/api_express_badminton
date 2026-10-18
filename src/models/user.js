@@ -4,11 +4,8 @@ const userSchema = new mongoose.Schema({
     email: {
         type: String,
         required: false,
-        unique: true,
-        sparse: true,
         trim: true,
-        lowercase: true,
-        default: null
+        lowercase: true
     },
     password: {
         type: String,
@@ -46,5 +43,13 @@ const userSchema = new mongoose.Schema({
         default: null
     }
 }, { timestamps: true });
+
+userSchema.index(
+    { email: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { email: { $type: 'string' } }
+    }
+);
 
 module.exports = mongoose.model('User', userSchema, 'User');
