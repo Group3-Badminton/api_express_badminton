@@ -13,6 +13,7 @@ const bookingSchema = new mongoose.Schema({
   },
   voucherId: {
     type: mongoose.Schema.Types.ObjectId,
+    ref: 'Voucher',
     default: null
   },
   bookingCode: {
@@ -49,13 +50,13 @@ const bookingSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED'],
-    default: 'CONFIRMED'
+    enum: ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'REJECTED'],
+    default: 'PENDING'
   },
   paymentStatus: {
     type: String,
     enum: ['UNPAID', 'PAID', 'REFUNDED'],
-    default: 'PAID'
+    default: 'UNPAID'
   },
   paymentMethod: {
     type: String,
