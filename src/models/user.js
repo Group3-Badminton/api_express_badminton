@@ -3,14 +3,14 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
     email: {
         type: String,
-        required: true,
-        unique: true,
         trim: true,
-        lowercase: true
+        lowercase: true,
+        sparse: true,
+        unique: true
     },
     password: {
         type: String,
-        required: true
+        default: null
     },
     fullName: {
         type: String,
@@ -19,7 +19,9 @@ const userSchema = new mongoose.Schema({
     },
     phone: {
         type: String,
-        default: ''
+        required: true,
+        trim: true,
+        index: true
     },
     role: {
         type: String,
@@ -30,6 +32,10 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ['ACTIVE', 'INACTIVE', 'LOCKED', 'PENDING_VERIFICATION'],
         default: 'ACTIVE'
+    },
+    address: {
+        type: String,
+        default: ''
     },
     resetOtp: {
         type: String,
