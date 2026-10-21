@@ -30,6 +30,14 @@ app.use("/api/vouchers", require('./src/routes/voucherRoutes'));
 app.use("/api/staffs", require('./src/routes/staffRoutes'));
 app.use("/api/courts", require('./src/routes/courtRoutes'));
 app.use("/api/bookings", require('./src/routes/bookingRoutes'));
+app.use("/api/sessions", require('./src/routes/sessionRoutes'));
+app.use("/api/invoices", require('./src/routes/invoiceRoutes'));
+
+// Khôi phục các job cảnh báo sắp hết giờ khi server khởi động
+const { restoreActiveSessionJobs } = require('./src/schedulers/sessionScheduler');
+setTimeout(() => {
+  restoreActiveSessionJobs().catch(() => {});
+}, 3000);
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
   next(createError(404));
