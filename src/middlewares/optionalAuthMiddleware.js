@@ -22,6 +22,10 @@ module.exports = async (req, res, next) => {
             role: currentUser.role,
             status: currentUser.status
           };
+        } else if (currentUser && currentUser.status !== 'ACTIVE') {
+          req.authAccountBlocked = true;
+          req.authAccountMessage = currentUser.lockReason ||
+            'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!';
         }
       } catch (err) {
         // Token không hợp lệ thì coi như khách chưa đăng nhập

@@ -9,6 +9,7 @@ class BookingController {
     this.getTimeSlots = this.getTimeSlots.bind(this);
     this.getCourtAvailability = this.getCourtAvailability.bind(this);
     this.validateVoucher = this.validateVoucher.bind(this);
+    this.calculatePrice = this.calculatePrice.bind(this);
     this.createBooking = this.createBooking.bind(this);
     this.updateBookingStatus = this.updateBookingStatus.bind(this);
     this.changeBookingInfo = this.changeBookingInfo.bind(this);
@@ -60,7 +61,7 @@ class BookingController {
   async getCourtAvailability(req, res) {
     try {
       const { courtId, bookingDate } = req.query;
-      const result = await bookingService.getCourtAvailability(courtId, bookingDate);
+      const result = await bookingService.getCourtAvailability(courtId, bookingDate, req.user);
       return sendSuccess(res, result, 'Lấy thông tin tình trạng khung giờ sân thành công!', 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);
@@ -78,9 +79,26 @@ class BookingController {
     }
   }
 
+  // Tính toán bảng giá chi tiết theo từng sân và từng khung giờ (tách cao điểm / thấp điểm)
+  async calculatePrice(req, res) {
+    try {
+      const result = await bookingService.calculateBookingPrice(req.body);
+      return sendSuccess(res, result, 'Tính giá đặt sân chi tiết thành công!', 200);
+    } catch (error) {
+      return sendError(res, error.message, error.statusCode || 500);
+    }
+  }
+
   // 7. Tạo mới đơn đặt sân (Hỗ trợ cả khách đăng nhập lẫn khách vãng lai không cần email)
   async createBooking(req, res) {
     try {
+      if (req.authAccountBlocked) {
+        return sendError(
+          res,
+          req.authAccountMessage || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!',
+          403
+        );
+      }
       const result = await bookingService.createBooking(req.body, req.user);
       return sendSuccess(res, result, 'Đặt sân cầu lông thành công!', 201);
     } catch (error) {
@@ -91,8 +109,19 @@ class BookingController {
   // 8. Cập nhật trạng thái đơn đặt sân
   async updateBookingStatus(req, res) {
     try {
-      const result = await bookingService.updateBookingStatus(req.params.id, req.body);
-      return sendSuccess(res, result, 'Cập nhật trạng thái đặt sân thành công!', 200);
+      const result = await bookingService.updateBookingStatus(req.params.id, req.body, req.user);
+      const message = result.cancellationResult?.accountLocked
+        ? result.cancellationResult.lockReason
+        : result.cancellationResult?.scope === 'ITEMS'
+          ? 'Hủy các lịch sân đã chọn thành công!'
+        : result.cancellationResult?.scope === 'BOOKING' && req.user?.role !== 'CUSTOMER'
+          ? 'Hủy đơn đặt sân thành công!'
+        : req.user?.role === 'CUSTOMER'
+          ? (result.cancellationResult?.scope === 'ITEM' && result.status !== 'CANCELLED'
+            ? 'Hủy lịch sân trong đơn thành công!'
+            : 'Hủy đơn đặt sân thành công!')
+          : 'Cập nhật trạng thái đặt sân thành công!';
+      return sendSuccess(res, result, message, 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);
     }
@@ -101,10 +130,12 @@ class BookingController {
   // 9. AF1: Thay đổi thông tin đặt sân (Change Booking Information)
   async changeBookingInfo(req, res) {
     try {
-      const { booking, notificationSent } = await bookingService.changeBookingInfo(req.params.id, req.body);
+      const { booking, notificationSent } = await bookingService.changeBookingInfo(req.params.id, req.body, req.user);
       const msg = notificationSent
-        ? 'Thay đổi thông tin và xác nhận đặt sân thành công!'
-        : 'Yêu cầu đặt sân đã được xử lý và xác nhận thành công, nhưng không thể gửi thông báo.';
+        ? (req.user?.role === 'CUSTOMER'
+          ? 'Cập nhật yêu cầu đặt sân thành công. Đơn tiếp tục chờ duyệt.'
+          : 'Cập nhật thông tin đặt sân thành công. Trạng thái đơn được giữ nguyên.')
+        : 'Đơn đã được cập nhật nhưng không thể gửi thông báo.';
       return sendSuccess(res, booking, msg, 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);
@@ -114,7 +145,7 @@ class BookingController {
   // 10. AF2: Từ chối yêu cầu đặt sân (Reject Booking)
   async rejectBooking(req, res) {
     try {
-      const { booking, notificationSent } = await bookingService.rejectBooking(req.params.id, req.body?.reason);
+      const { booking, notificationSent } = await bookingService.rejectBooking(req.params.id, req.body?.reason, req.user);
       const msg = notificationSent
         ? 'Từ chối yêu cầu đặt sân thành công!'
         : 'Yêu cầu đặt sân đã được xử lý thành công, nhưng không thể gửi thông báo.';
