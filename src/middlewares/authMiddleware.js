@@ -26,7 +26,11 @@ module.exports = async (req, res, next) => {
     }
 
     if (currentUser.status !== 'ACTIVE') {
-      return sendError(res, 'Tài khoản của bạn đã bị vô hiệu hóa hoặc bị khóa. Vui lòng liên hệ quản trị viên!', 403);
+      return sendError(
+        res,
+        currentUser.lockReason || 'Tài khoản của bạn đã bị vô hiệu hóa hoặc bị khóa. Vui lòng liên hệ quản trị viên!',
+        403
+      );
     }
 
     req.user = {

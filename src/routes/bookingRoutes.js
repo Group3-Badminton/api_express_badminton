@@ -3,6 +3,7 @@ const router = express.Router();
 const bookingController = require('../controllers/bookingController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const optionalAuth = require('../middlewares/optionalAuthMiddleware');
+const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
 
 // 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
 router.get('/courts', optionalAuth, bookingController.getCourts);
@@ -15,6 +16,9 @@ router.get('/availability', optionalAuth, bookingController.getCourtAvailability
 
 // 4. Kiểm tra và áp dụng mã giảm giá (Voucher)
 router.post('/validate-voucher', optionalAuth, bookingController.validateVoucher);
+
+// Tính giá chi tiết cho từng sân và từng khung giờ (tách cao điểm / thấp điểm)
+router.post('/calculate-price', optionalAuth, bookingController.calculatePrice);
 
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
 router.get('/', authMiddleware, bookingController.getAllBookings);
@@ -32,7 +36,7 @@ router.patch('/:id/status', authMiddleware, bookingController.updateBookingStatu
 router.patch('/:id/change-info', authMiddleware, bookingController.changeBookingInfo);
 
 // AF2: Từ chối yêu cầu đặt sân (Reject Booking)
-router.patch('/:id/reject', authMiddleware, bookingController.rejectBooking);
+router.patch('/:id/reject', authMiddleware, staffOrAdminMiddleware, bookingController.rejectBooking);
 
 // 8. Tạo mới đơn đặt sân (hỗ trợ cả khách đăng nhập lẫn khách vãng lai)
 router.post('/', optionalAuth, bookingController.createBooking);

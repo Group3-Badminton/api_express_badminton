@@ -50,8 +50,8 @@ const bookingSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'REJECTED'],
-    default: 'PENDING'
+    enum: ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN', 'COMPLETED', 'CANCELLED', 'REJECTED'],
+    default: 'PENDING_APPROVAL'
   },
   paymentStatus: {
     type: String,
@@ -63,6 +63,104 @@ const bookingSchema = new mongoose.Schema({
     enum: ['CASH', 'TRANSFER', 'VIETQR', 'ONLINE'],
     default: 'CASH'
   },
+  items: [
+    {
+      courtId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Court',
+        required: true
+      },
+      courtName: {
+        type: String,
+        default: ''
+      },
+      courtType: {
+        type: String,
+        default: ''
+      },
+      location: {
+        type: String,
+        default: ''
+      },
+      bookingDate: {
+        type: Date,
+        default: undefined
+      },
+      status: {
+        type: String,
+        enum: ['ACTIVE', 'CANCELLED'],
+        default: 'ACTIVE'
+      },
+      startTime: {
+        type: String,
+        required: true,
+        trim: true
+      },
+      endTime: {
+        type: String,
+        required: true,
+        trim: true
+      },
+      durationMinutes: {
+        type: Number,
+        default: 0
+      },
+      durationHours: {
+        type: Number,
+        default: 0
+      },
+      price: {
+        type: Number,
+        default: 0
+      },
+      intervals: [
+        {
+          startTime: String,
+          endTime: String,
+          durationMinutes: Number,
+          durationHours: Number,
+          priceType: String,
+          hourlyRate: Number,
+          amount: Number
+        }
+      ]
+    }
+  ],
+  cancellationHistory: [
+    {
+      cancelledAt: {
+        type: Date,
+        required: true
+      },
+      cancelledBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+      },
+      cancelledByRole: {
+        type: String,
+        enum: ['ADMIN', 'STAFF', 'CUSTOMER'],
+        required: true
+      },
+      previousStatus: {
+        type: String,
+        required: true
+      },
+      itemId: {
+        type: mongoose.Schema.Types.ObjectId,
+        default: null
+      },
+      scope: {
+        type: String,
+        enum: ['ITEM', 'BOOKING'],
+        default: 'BOOKING'
+      },
+      countsTowardMonthlyLimit: {
+        type: Boolean,
+        default: false
+      }
+    }
+  ],
   note: {
     type: String,
     default: ''
