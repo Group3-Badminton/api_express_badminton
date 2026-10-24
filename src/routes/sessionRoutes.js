@@ -1,11 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const sessionController = require('../controllers/sessionController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
 // Tất cả các route của Playing Session đều yêu cầu quyền Staff hoặc Admin
-router.use(authMiddleware, staffOrAdminMiddleware);
+router.use(authenticateUser, authorizeRole(['STAFF', 'ADMIN']));
 
 router.get('/matrix', sessionController.getCourtMatrix);
 router.get('/current', sessionController.getCurrentLiveBoard);

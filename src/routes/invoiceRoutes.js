@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const invoiceController = require('../controllers/invoiceController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
-router.use(authMiddleware, staffOrAdminMiddleware);
+router.use(authenticateUser, authorizeRole(['STAFF', 'ADMIN']));
 
 router.get('/', invoiceController.getInvoices);
 router.get('/:id', invoiceController.getInvoiceById);

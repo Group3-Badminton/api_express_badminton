@@ -36,7 +36,11 @@ exports.login = async (req, res) => {
 
     // 4. Kiểm tra tài khoản có bị khóa không
     if (user.status !== 'ACTIVE') {
-      return sendError(res, 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!', 403);
+      return sendError(
+        res,
+        user.lockReason || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!',
+        403
+      );
     }
 
     const token = jwt.sign(

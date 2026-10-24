@@ -1,11 +1,9 @@
 const router = require('express').Router();
 const staffController = require('../controllers/staffController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const adminMiddleware = require('../middlewares/adminMiddleware');
+const { authenticateUser, checkAdmin } = require('../middlewares/authMiddleware');
 
-// Tất cả endpoint quản lý nhân viên yêu cầu Admin đăng nhập và đang ACTIVE
-router.use(authMiddleware);
-router.use(adminMiddleware);
+// Tất cả endpoint quản lý nhân viên yêu cầu Admin đăng nhập
+router.use(authenticateUser, checkAdmin);
 
 router.get('/', staffController.getStaffs);
 router.get('/:id', staffController.getStaffById);

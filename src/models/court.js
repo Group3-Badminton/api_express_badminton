@@ -1,23 +1,23 @@
 const mongoose = require('mongoose');
 
 const courtSchema = new mongoose.Schema({
-  name: {
+  courtName: {
     type: String,
     trim: true,
     maxlength: 100
   },
-  courtName: {
+  name: {
     type: String,
     trim: true,
     maxlength: 100
   },
   courtType: {
     type: String,
-    default: 'Sân Thảm Tiêu Chuẩn'
+    default: 'Sân Tiêu Chuẩn'
   },
   location: {
     type: String,
-    default: ''
+    default: 'Trong nhà'
   },
   status: {
     type: String,
@@ -28,6 +28,18 @@ const courtSchema = new mongoose.Schema({
     type: String,
     enum: ['AVAILABLE', 'IN_USE', 'CLEANING', 'MAINTENANCE'],
     default: 'AVAILABLE'
+  },
+  bookingVersion: {
+    type: Number,
+    default: 0
+  },
+  bookingLockToken: {
+    type: String,
+    default: undefined
+  },
+  bookingLockUntil: {
+    type: Date,
+    default: undefined
   },
   description: {
     type: String,
@@ -45,7 +57,7 @@ const courtSchema = new mongoose.Schema({
     default: '23:00',
     match: /^([01]\d|2[0-3]):([0-5]\d)$/
   }
-}, { timestamps: true });
+}, { timestamps: true, strict: false });
 
 courtSchema.pre('validate', function() {
   if (!this.name && this.courtName) this.name = this.courtName;

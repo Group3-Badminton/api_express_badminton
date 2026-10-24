@@ -1,31 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const { requireRole } = require('../middlewares/roleMiddleware');
+const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
 
 // Tất cả API sản phẩm yêu cầu đăng nhập
-router.use(authMiddleware);
+router.use(authenticateUser);
 
-// UC-14.1 & UC-14.6: Xem danh sách & Tìm kiếm, lọc (Staff & Admin)
-router.get('/', requireRole('ADMIN', 'STAFF'), productController.getProducts);
+// UC-14.1 & UC-14.2 & UC-14.6: Xem danh sách & Chi tiết sản phẩm (Staff & Admin)
+router.get('/', authorizeRole(['ADMIN', 'STAFF']), productController.getProducts);
+router.get('/:id', authorizeRole(['ADMIN', 'STAFF']), productController.getProductById);
 
-// UC-14.2: Xem chi tiết sản phẩm (Staff & Admin)
-router.get('/:id', requireRole('ADMIN', 'STAFF'), productController.getProductById);
-
-// UC-14.3: Tạo sản phẩm mới (Admin only)
-router.post('/', requireRole('ADMIN'), productController.createProduct);
-
-// UC-14.4: Cập nhật thông tin sản phẩm (Admin only)
-router.patch('/:id', requireRole('ADMIN'), productController.updateProduct);
-
-// UC-14.5: Vô hiệu hóa sản phẩm (Admin only)
-router.patch('/:id/deactivate', requireRole('ADMIN'), productController.deactivateProduct);
-
-// Kích hoạt lại sản phẩm (Admin only)
-router.patch('/:id/activate', requireRole('ADMIN'), productController.activateProduct);
-
-// UC-14.7: Nhập kho sản phẩm (Admin only)
-router.post('/:id/stock-ins', requireRole('ADMIN'), productController.stockIn);
+// UC-14.3, 14.4, 14.5, 14.7: Thao tác CRUD Tạo, Sửa, Vô hiệu hóa, Kích hoạt, Nhập kho (CHỈ ADMIN)
+router.post('/', checkAdmin, productController.createProduct);
+router.patch('/:id', checkAdmin, productController.updateProduct);
+router.patch('/:id/deactivate', checkAdmin, productController.deactivateProduct);
+router.patch('/:id/activate', checkAdmin, productController.activateProduct);
+router.post('/:id/stock-ins', checkAdmin, productController.stockIn);
 
 module.exports = router;
