@@ -23,8 +23,8 @@ router.post('/calculate-price', optionalAuth, bookingController.calculatePrice);
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
 router.get('/', authMiddleware, bookingController.getAllBookings);
 
-// Danh sách khách hàng phục vụ nhân viên đặt sân
-router.get('/customers', authMiddleware, bookingController.getCustomers);
+// Danh sách khách hàng phục vụ nhân viên đặt sân (yêu cầu quyền Staff hoặc Admin)
+router.get('/customers', authMiddleware, staffOrAdminMiddleware, bookingController.getCustomers);
 
 // 6. Lấy chi tiết đơn đặt sân theo ID
 router.get('/:id', authMiddleware, bookingController.getBookingById);

@@ -331,7 +331,7 @@ class BookingService {
     };
     return {
       ...(excludeBookingId ? { _id: { $ne: excludeBookingId } } : {}),
-      status: { $nin: ['CANCELLED', 'REJECTED'] },
+      status: { $in: ['CONFIRMED', 'CHECKED_IN', 'COMPLETED'] },
       $or: [
         {
           items: {
@@ -753,10 +753,10 @@ class BookingService {
         endTime: slot.endTime,
         label: slot.label || `${slot.startTime} - ${slot.endTime}`,
         price: slotPrice,
-        dayType
+        dayType,
+        isBooked: !!bookedBooking
       };
       if (currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF') {
-        slotDetail.isBooked = !!bookedBooking;
         slotDetail.bookingCode = bookedBooking ? bookedBooking.bookingCode : null;
       }
       return slotDetail;
@@ -787,7 +787,10 @@ class BookingService {
     }
 
     const code = voucherCode.trim().toUpperCase();
-    const voucher = await Voucher.findOne({ voucherCode: code, status: 'ACTIVE' });
+    const voucher = await Voucher.findOne({
+      $or: [{ voucherCode: code }, { code }],
+      status: 'ACTIVE'
+    });
 
     if (!voucher) {
       const err = new Error('Mã giảm giá không tồn tại hoặc đã bị khóa!');
@@ -815,19 +818,21 @@ class BookingService {
     }
 
     const currentAmount = Number(orderAmount) || 0;
-    if (voucher.minOrderAmount > 0 && currentAmount < voucher.minOrderAmount) {
+    const minAmount = voucher.minOrderAmount ?? voucher.minInvoiceAmount ?? 0;
+    if (minAmount > 0 && currentAmount < minAmount) {
       const err = new Error(
-        `Đơn đặt sân phải có giá trị tối thiểu từ ${voucher.minOrderAmount.toLocaleString('vi-VN')}đ để sử dụng mã này!`
+        `Đơn đặt sân phải có giá trị tối thiểu từ ${minAmount.toLocaleString('vi-VN')}đ để sử dụng mã này!`
       );
       err.statusCode = 400;
       throw err;
     }
 
     let discount = 0;
+    const maxDiscount = voucher.maxDiscount ?? voucher.maxDiscountAmount ?? 0;
     if (voucher.discountType === 'PERCENTAGE') {
       discount = Math.round((currentAmount * voucher.discountValue) / 100);
-      if (voucher.maxDiscount > 0 && discount > voucher.maxDiscount) {
-        discount = voucher.maxDiscount;
+      if (maxDiscount > 0 && discount > maxDiscount) {
+        discount = maxDiscount;
       }
     } else {
       discount = Math.min(voucher.discountValue, currentAmount);
@@ -837,8 +842,8 @@ class BookingService {
 
     return {
       voucherId: voucher._id,
-      voucherCode: voucher.voucherCode,
-      voucherName: voucher.voucherName,
+      voucherCode: voucher.voucherCode || voucher.code,
+      voucherName: voucher.voucherName || voucher.name,
       discountType: voucher.discountType,
       discountValue: voucher.discountValue,
       discount,
@@ -1045,28 +1050,33 @@ class BookingService {
 
     if (voucherCode && voucherCode.trim()) {
       const code = voucherCode.trim().toUpperCase();
-      const voucher = await Voucher.findOne({ voucherCode: code, status: 'ACTIVE' });
+      const voucher = await Voucher.findOne({
+        $or: [{ voucherCode: code }, { code }],
+        status: 'ACTIVE'
+      });
       if (voucher) {
         const now = new Date();
         const isValidDate = (!voucher.startDate || now >= new Date(voucher.startDate)) &&
           (!voucher.endDate || now <= new Date(voucher.endDate));
         const isExistingVoucher = existingVoucherId && voucher._id.toString() === existingVoucherId.toString();
         const hasLimit = isExistingVoucher || voucher.usageLimit <= 0 || voucher.usedCount < voucher.usageLimit;
-        const meetsMinOrder = !voucher.minOrderAmount || totalBasePrice >= voucher.minOrderAmount;
+        const minAmount = voucher.minOrderAmount ?? voucher.minInvoiceAmount ?? 0;
+        const meetsMinOrder = !minAmount || totalBasePrice >= minAmount;
 
         if (isValidDate && hasLimit && meetsMinOrder) {
           appliedVoucher = {
             voucherId: voucher._id,
-            voucherCode: voucher.voucherCode,
-            voucherName: voucher.voucherName,
+            voucherCode: voucher.voucherCode || voucher.code,
+            voucherName: voucher.voucherName || voucher.name,
             discountType: voucher.discountType,
             discountValue: voucher.discountValue
           };
 
+          const maxDiscount = voucher.maxDiscount ?? voucher.maxDiscountAmount ?? 0;
           if (voucher.discountType === 'PERCENTAGE') {
             discount = Math.round((totalBasePrice * voucher.discountValue) / 100);
-            if (voucher.maxDiscount > 0 && discount > voucher.maxDiscount) {
-              discount = voucher.maxDiscount;
+            if (maxDiscount > 0 && discount > maxDiscount) {
+              discount = maxDiscount;
             }
           } else {
             discount = Math.min(voucher.discountValue, totalBasePrice);
@@ -1112,6 +1122,20 @@ class BookingService {
       ? bodyCustomerId
       : null;
 
+    if ((currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF') && bodyCustomerId) {
+      if (!mongoose.Types.ObjectId.isValid(bodyCustomerId)) {
+        const err = new Error('Mã khách hàng không hợp lệ.');
+        err.statusCode = 400;
+        throw err;
+      }
+      const targetCustomer = await User.findById(bodyCustomerId).select('_id status lockReason');
+      if (!targetCustomer) {
+        const err = new Error('Không tìm thấy thông tin khách hàng được chọn.');
+        err.statusCode = 404;
+        throw err;
+      }
+    }
+
     // Nếu người dùng đang đăng nhập với quyền CUSTOMER
     if (currentUser && currentUser.role === 'CUSTOMER') {
       customerId = currentUser.userId || currentUser._id;
@@ -1148,6 +1172,13 @@ class BookingService {
 
           existingUser = await User.create(newUserData);
         } else {
+          if (existingUser.status !== 'ACTIVE') {
+            const err = new Error(
+              existingUser.lockReason || 'Tài khoản liên kết với số điện thoại này đã bị khóa. Vui lòng liên hệ Admin.'
+            );
+            err.statusCode = 403;
+            throw err;
+          }
           let needSave = false;
           if (customerName && customerName.trim() && existingUser.fullName === 'Khách vãng lai') {
             existingUser.fullName = customerName.trim();
@@ -1220,6 +1251,11 @@ class BookingService {
 
     // 2. Kiểm tra ngày đặt không được trong quá khứ
     const bookingDateObj = new Date(bookingDate);
+    if (!bookingDate || Number.isNaN(bookingDateObj.getTime())) {
+      const err = new Error('Ngày đặt sân không hợp lệ!');
+      err.statusCode = 400;
+      throw err;
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -2054,7 +2090,31 @@ class BookingService {
 
     const updateFields = {};
     if (status) updateFields.status = status;
-    if (paymentStatus) updateFields.paymentStatus = paymentStatus;
+    if (paymentStatus) {
+      if (paymentStatus === 'PAID') {
+        if (booking.paymentStatus === 'PAID') {
+          const err = new Error('Đơn đặt sân này đã được ghi nhận thanh toán trước đó.');
+          err.statusCode = 409;
+          throw err;
+        }
+        const effectiveStatus = status || booking.status;
+        if (!['CONFIRMED', 'CHECKED_IN', 'COMPLETED'].includes(effectiveStatus)) {
+          const err = new Error(
+            `Không thể ghi nhận thanh toán cho đơn đang ở trạng thái ${booking.status}. Chỉ ghi nhận thanh toán khi đơn đã xác nhận, đang nhận sân hoặc đã hoàn thành.`
+          );
+          err.statusCode = 409;
+          throw err;
+        }
+      }
+      if (['CANCELLED', 'REJECTED'].includes(booking.status) && !status) {
+        const err = new Error(
+          `Không thể cập nhật thanh toán cho đơn đã bị ${booking.status === 'CANCELLED' ? 'hủy' : 'từ chối'}.`
+        );
+        err.statusCode = 409;
+        throw err;
+      }
+      updateFields.paymentStatus = paymentStatus;
+    }
     if (typeof note === 'string' && isStaff) {
       updateFields.note = status === 'REJECTED'
         ? (booking.note ? `${booking.note} | ${note}` : note)
@@ -2112,7 +2172,7 @@ class BookingService {
     const hasItemId = Object.prototype.hasOwnProperty.call(updateData, 'itemId');
     const hasItemIds = Object.prototype.hasOwnProperty.call(updateData, 'itemIds');
     if (isCustomer && (paymentStatus || typeof note === 'string' || status !== 'CANCELLED' || hasItemIds)) {
-      const err = new Error('Khách hàng chỉ được hủy đơn đang chờ duyệt của chính mình.');
+      const err = new Error('Khách hàng chỉ có quyền hủy đơn đặt sân của chính mình.');
       err.statusCode = 403;
       throw err;
     }
@@ -2235,18 +2295,8 @@ class BookingService {
           err.statusCode = 404;
           throw err;
         }
-        if (isCustomer && booking.customerId.toString() !== (currentUser.userId || currentUser._id).toString()) {
-          const err = new Error('Bạn không có quyền cập nhật đơn đặt sân này.');
-          err.statusCode = 403;
-          throw err;
-        }
         if (status && status === booking.status && ['CANCELLED', 'REJECTED'].includes(status)) {
           const err = new Error(`Đơn đã ở trạng thái ${status} và không thể xử lý lặp lại.`);
-          err.statusCode = 409;
-          throw err;
-        }
-        if (isCustomer && status && !(isPendingBooking(booking.status) && status === 'CANCELLED')) {
-          const err = new Error('Khách hàng chỉ được hủy đơn đang chờ duyệt.');
           err.statusCode = 409;
           throw err;
         }
@@ -2260,7 +2310,7 @@ class BookingService {
             CANCELLED: [],
             REJECTED: []
           };
-          if (!isCustomer && !(transitions[booking.status] || []).includes(status)) {
+          if (!(transitions[booking.status] || []).includes(status)) {
             const err = new Error(
               `Không thể chuyển đơn từ ${booking.status} sang ${status}; đơn đã xử lý không thể duyệt hoặc từ chối lại.`
             );
@@ -2271,7 +2321,31 @@ class BookingService {
 
         const previousStatus = booking.status;
         if (status) booking.status = status;
-        if (paymentStatus) booking.paymentStatus = paymentStatus;
+        if (paymentStatus) {
+          if (paymentStatus === 'PAID') {
+            if (booking.paymentStatus === 'PAID') {
+              const err = new Error('Đơn đặt sân này đã được ghi nhận thanh toán trước đó.');
+              err.statusCode = 409;
+              throw err;
+            }
+            const effectiveStatus = status || booking.status;
+            if (!['CONFIRMED', 'CHECKED_IN', 'COMPLETED'].includes(effectiveStatus)) {
+              const err = new Error(
+                `Không thể ghi nhận thanh toán cho đơn đang ở trạng thái ${booking.status}. Chỉ ghi nhận thanh toán khi đơn đã xác nhận, đang nhận sân hoặc đã hoàn thành.`
+              );
+              err.statusCode = 409;
+              throw err;
+            }
+          }
+          if (['CANCELLED', 'REJECTED'].includes(booking.status) && !status) {
+            const err = new Error(
+              `Không thể cập nhật thanh toán cho đơn đã bị ${booking.status === 'CANCELLED' ? 'hủy' : 'từ chối'}.`
+            );
+            err.statusCode = 409;
+            throw err;
+          }
+          booking.paymentStatus = paymentStatus;
+        }
         if (typeof note === 'string' && isStaff) {
           booking.note = status === 'REJECTED'
             ? (booking.note ? `${booking.note} | ${note}` : note)
@@ -2460,9 +2534,15 @@ class BookingService {
         ...(changeData.endTime ? { endTime: changeData.endTime } : {})
       };
     }
-    if (changeData.bookingDate && !isStaff) {
+    if (changeData.bookingDate) {
+      const parsedDate = new Date(changeData.bookingDate);
+      if (Number.isNaN(parsedDate.getTime())) {
+        const err = new Error('Ngày đặt sân không hợp lệ.');
+        err.statusCode = 400;
+        throw err;
+      }
       targetOrders.forEach((order) => {
-        if (order.status !== 'CANCELLED') order.bookingDate = changeData.bookingDate;
+        if (order.status !== 'CANCELLED') order.bookingDate = parsedDate;
       });
     }
     if (targetOrders.length === 0) {
@@ -2471,7 +2551,9 @@ class BookingService {
       throw err;
     }
 
-    const targetBookingDate = originalBooking.bookingDate;
+    const targetBookingDate = changeData.bookingDate
+      ? new Date(changeData.bookingDate)
+      : originalBooking.bookingDate;
     const activeTargetOrders = targetOrders.filter((order) => order.status !== 'CANCELLED');
     if (activeTargetOrders.length === 0) {
       const err = new Error('Đơn đặt sân phải còn ít nhất một lịch chưa bị hủy.');
@@ -2686,7 +2768,12 @@ class BookingService {
   /**
    * 11. Lấy danh sách khách hàng phục vụ staff / admin đặt sân
    */
-  async getCustomers() {
+  async getCustomers(currentUser = null) {
+    if (currentUser && currentUser.role !== 'ADMIN' && currentUser.role !== 'STAFF') {
+      const err = new Error('Bạn không có quyền truy cập danh sách khách hàng.');
+      err.statusCode = 403;
+      throw err;
+    }
     return User.find({ role: 'CUSTOMER' })
       .select('fullName phone email address')
       .sort({ fullName: 1 })
