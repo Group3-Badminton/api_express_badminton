@@ -1,11 +1,9 @@
 const router = require('express').Router();
 const customerController = require('../controllers/customerController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
-// Tất cả endpoint Quản lý khách hàng (UC-06) yêu cầu Nhân viên hoặc Admin đang ACTIVE
-router.use(authMiddleware);
-router.use(staffOrAdminMiddleware);
+// Tất cả endpoint Quản lý khách hàng (UC-06) yêu cầu Nhân viên hoặc Admin
+router.use(authenticateUser, authorizeRole(['ADMIN', 'STAFF']));
 
 router.get('/', customerController.getCustomers);
 router.get('/:id', customerController.getCustomerById);

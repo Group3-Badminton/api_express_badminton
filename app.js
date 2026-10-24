@@ -30,6 +30,8 @@ app.use("/api/vouchers", require('./src/routes/voucherRoutes'));
 app.use("/api/staffs", require('./src/routes/staffRoutes'));
 app.use("/api/customers", require('./src/routes/customerRoutes'));
 app.use("/api/courts", require('./src/routes/courtRoutes'));
+app.use("/api/pricing", require('./src/routes/pricingRoutes'));
+app.use("/api/prices", require('./src/routes/pricingRoutes'));
 app.use("/api/bookings", require('./src/routes/bookingRoutes'));
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
