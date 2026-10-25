@@ -1,42 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const bookingController = require('../controllers/bookingController');
-const { authenticateUser, authorizeRole, optionalAuth } = require('../middlewares/authMiddleware');
+const authMiddleware = require('../middlewares/authMiddleware');
+const optionalAuth = require('../middlewares/optionalAuthMiddleware');
+const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
 
-// 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (Công khai - Public)
-router.get('/courts', bookingController.getCourts);
+// 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
+router.get('/courts', optionalAuth, bookingController.getCourts);
 
-// 2. Danh sách khung giờ cố định (Công khai - Public)
-router.get('/time-slots', bookingController.getTimeSlots);
+// 2. Danh sách khung giờ cố định (cho phép xem công khai)
+router.get('/time-slots', optionalAuth, bookingController.getTimeSlots);
 
-// 3. Kiểm tra tình trạng khung giờ còn trống & Bảng giá (Công khai - Public)
-router.get('/availability', bookingController.getCourtAvailability);
+// 3. Kiểm tra tình trạng khung giờ còn trống & Bảng giá theo Sân và Ngày (cho phép xem công khai)
+router.get('/availability', optionalAuth, bookingController.getCourtAvailability);
 
-// 4. Kiểm tra và áp dụng mã giảm giá Voucher (Công khai - Public)
-router.post('/validate-voucher', bookingController.validateVoucher);
+// 4. Kiểm tra và áp dụng mã giảm giá (Voucher)
+router.post('/validate-voucher', optionalAuth, bookingController.validateVoucher);
 
-// 5. Tính giá chi tiết cho từng sân và khung giờ (Công khai - Public)
-router.post('/calculate-price', bookingController.calculatePrice);
+// Tính giá chi tiết cho từng sân và từng khung giờ (tách cao điểm / thấp điểm)
+router.post('/calculate-price', optionalAuth, bookingController.calculatePrice);
 
-// 6. Lấy danh sách bookings (yêu cầu đăng nhập)
-router.get('/', authenticateUser, bookingController.getAllBookings);
+// 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
+router.get('/', authMiddleware, bookingController.getAllBookings);
 
-// 7. Danh sách khách hàng phục vụ nhân viên đặt sân tại quầy (Staff & Admin)
-router.get('/customers', authenticateUser, authorizeRole(['ADMIN', 'STAFF']), bookingController.getCustomers);
+// Danh sách khách hàng phục vụ nhân viên đặt sân (yêu cầu quyền Staff hoặc Admin)
+router.get('/customers', authMiddleware, staffOrAdminMiddleware, bookingController.getCustomers);
 
-// 8. Lấy chi tiết đơn đặt sân theo ID (yêu cầu đăng nhập)
-router.get('/:id', authenticateUser, bookingController.getBookingById);
+// 6. Lấy chi tiết đơn đặt sân theo ID
+router.get('/:id', authMiddleware, bookingController.getBookingById);
 
-// 9. Cập nhật trạng thái đơn đặt sân (yêu cầu đăng nhập)
-router.patch('/:id/status', authenticateUser, bookingController.updateBookingStatus);
+// 7. Cập nhật trạng thái đơn đặt sân
+router.patch('/:id/status', authMiddleware, bookingController.updateBookingStatus);
 
-// 10. Thay đổi thông tin đặt sân (yêu cầu đăng nhập)
-router.patch('/:id/change-info', authenticateUser, bookingController.changeBookingInfo);
+// AF1: Thay đổi thông tin đặt sân (Change Booking Information)
+router.patch('/:id/change-info', authMiddleware, bookingController.changeBookingInfo);
 
-// 11. Từ chối yêu cầu đặt sân (Staff & Admin)
-router.patch('/:id/reject', authenticateUser, authorizeRole(['ADMIN', 'STAFF']), bookingController.rejectBooking);
+// AF2: Từ chối yêu cầu đặt sân (Reject Booking)
+router.patch('/:id/reject', authMiddleware, staffOrAdminMiddleware, bookingController.rejectBooking);
 
-// 12. Tạo mới đơn đặt sân (hỗ trợ cả khách đăng nhập lẫn khách vãng lai)
+// 8. Tạo mới đơn đặt sân (hỗ trợ cả khách đăng nhập lẫn khách vãng lai)
 router.post('/', optionalAuth, bookingController.createBooking);
 
 module.exports = router;

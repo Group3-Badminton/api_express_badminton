@@ -158,7 +158,7 @@ class BookingController {
   // 11. Lấy danh sách khách hàng phục vụ staff / admin đặt sân
   async getCustomers(req, res) {
     try {
-      const result = await bookingService.getCustomers();
+      const result = await bookingService.getCustomers(req.user);
       return sendSuccess(res, result, 'Lấy danh sách khách hàng thành công!', 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);
