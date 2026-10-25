@@ -4,6 +4,7 @@ const Court = require('../models/court');
 const User = require('../models/user');
 const TimeSlot = require('../models/timeSlot');
 const Price = require('../models/price');
+const PriceRule = require('../models/priceRule');
 const Voucher = require('../models/voucher');
 const Notification = require('../models/notification');
 const { canBookCourt } = require('../utils/courtValidation');
@@ -677,13 +678,18 @@ class BookingService {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
 
-    const timeSlots = await TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean();
-
-    const prices = await Price.find({
-      courtId,
-      dayType,
-      status: 'ACTIVE'
-    }).lean();
+    const [timeSlots, prices, priceRules] = await Promise.all([
+      TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean(),
+      Price.find({
+        courtId,
+        dayType,
+        status: 'ACTIVE'
+      }).lean(),
+      PriceRule.find({
+        status: 'ACTIVE',
+        daysOfWeek: dayOfWeek
+      }).lean()
+    ]);
 
     const startOfDay = new Date(bookingDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -714,6 +720,15 @@ class BookingService {
       ]
     }).select('courtId bookingDate startTime endTime bookingCode status items').lean();
 
+    const courtPricesMin = prices.length > 0 ? Math.min(...prices.map((p) => p.price)) : null;
+    const candidateRules = priceRules.filter((r) =>
+      r.courtType === 'ALL' || (court.courtType && court.courtType.toUpperCase().includes(r.courtType))
+    );
+    const dbDefaultPrice = candidateRules.length > 0
+      ? Math.min(...candidateRules.map((r) => r.pricePerHour))
+      : (priceRules.length > 0 ? Math.min(...priceRules.map((r) => r.pricePerHour)) : null);
+    const defaultPrice = courtPricesMin || dbDefaultPrice || 0;
+
     const slotDetails = timeSlots.map((slot) => {
       const priceDoc = prices.find(
         (p) =>
@@ -721,8 +736,17 @@ class BookingService {
           p.timeSlot.includes(slot.startTime)
       );
 
-      const defaultPrice = isWeekend ? 140000 : 100000;
-      const slotPrice = priceDoc ? priceDoc.price : defaultPrice;
+      let slotPrice;
+      if (priceDoc) {
+        slotPrice = priceDoc.price;
+      } else {
+        const matchedRule = priceRules.find((r) => {
+          const typeMatches = r.courtType === 'ALL' ||
+            (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+          return typeMatches && r.startTime <= slot.startTime && r.endTime >= slot.endTime;
+        });
+        slotPrice = matchedRule ? matchedRule.pricePerHour : defaultPrice;
+      }
 
       const bookedBooking = activeBookings.find((b) => {
         if (Array.isArray(b.items) && b.items.length > 0) {
@@ -928,11 +952,15 @@ class BookingService {
       };
     });
 
-    const allPrices = await Price.find({
-      courtId: { $in: uniqueCourtIds },
-      status: 'ACTIVE',
-      $or: priceDateConditions
-    }).populate('timeSlotId').lean();
+    const [allPrices, allPriceRules, allTimeSlots] = await Promise.all([
+      Price.find({
+        courtId: { $in: uniqueCourtIds },
+        status: 'ACTIVE',
+        $or: priceDateConditions
+      }).populate('timeSlotId').lean(),
+      PriceRule.find({ status: 'ACTIVE' }).lean(),
+      TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean()
+    ]);
 
     const courtBreakdowns = [];
 
@@ -959,7 +987,7 @@ class BookingService {
         (!p.effectiveTo || new Date(p.effectiveTo) >= orderStartOfDay)
       );
 
-      // Thu thập các mốc phân chia khung giá (boundaries)
+      // Thu thập các mốc phân chia khung giá (boundaries) từ Price và PriceRule trong database
       const points = new Set([bStart, bEnd]);
       courtPrices.forEach((p) => {
         if (p.timeSlot && p.timeSlot.includes('-')) {
@@ -970,15 +998,31 @@ class BookingService {
           if (eMin > bStart && eMin < bEnd) points.add(eMin);
         }
       });
-      // Mốc chuyển giao giờ cao điểm mặc định: 17:00 (1020 phút) và 21:00 (1260 phút)
-      if (1020 > bStart && 1020 < bEnd) points.add(1020);
-      if (1260 > bStart && 1260 < bEnd) points.add(1260);
+      allPriceRules.forEach((r) => {
+        if (r.startTime && r.endTime) {
+          const sMin = parseTimeToMinutes(r.startTime);
+          const eMin = parseTimeToMinutes(r.endTime);
+          if (sMin > bStart && sMin < bEnd) points.add(sMin);
+          if (eMin > bStart && eMin < bEnd) points.add(eMin);
+        }
+      });
 
       const sortedPoints = Array.from(points).sort((a, b) => a - b);
       const rawIntervals = [];
 
-      const isVip = (court.courtType && court.courtType.includes('VIP')) || (court.courtName && court.courtName.includes('VIP'));
-      const defaultRate = isWeekend ? (isVip ? 150000 : 110000) : (isVip ? 120000 : 80000);
+      // Xác định đơn giá cơ sở động từ bảng giá Price của sân hoặc PriceRule trong database
+      const courtPricesMin = courtPrices.length > 0 ? Math.min(...courtPrices.map((p) => p.price)) : null;
+      const candidateRules = allPriceRules.filter((r) => {
+        const typeMatches = r.courtType === 'ALL' ||
+          (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+        const dayOfWeek = orderDate.getDay();
+        return typeMatches && Array.isArray(r.daysOfWeek) && r.daysOfWeek.includes(dayOfWeek);
+      });
+      const dbBaseRate = candidateRules.length > 0
+        ? Math.min(...candidateRules.map((r) => r.pricePerHour))
+        : null;
+      const systemBaseRate = allPrices.length > 0 ? Math.min(...allPrices.map((p) => p.price)) : 0;
+      const defaultRate = courtPricesMin || dbBaseRate || systemBaseRate;
 
       for (let i = 0; i < sortedPoints.length - 1; i++) {
         const intStart = sortedPoints[i];
@@ -993,9 +1037,59 @@ class BookingService {
           return parseTimeToMinutes(s) <= midPoint && parseTimeToMinutes(e) >= midPoint;
         });
 
-        const hourlyRate = matchedPrice ? matchedPrice.price : defaultRate;
-        const isPeak = (intStart >= 17 * 60 && intEnd <= 21 * 60) || (!isWeekend && hourlyRate > (isVip ? 120000 : 80000));
-        const priceType = isPeak ? 'Giờ cao điểm (Giờ vàng)' : (isWeekend ? 'Cuối tuần' : 'Giờ thấp điểm (Giờ thường)');
+        let hourlyRate;
+        let matchedRule = null;
+        if (matchedPrice) {
+          hourlyRate = matchedPrice.price;
+        } else {
+          matchedRule = allPriceRules.find((r) => {
+            const typeMatches = r.courtType === 'ALL' ||
+              (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+            const dayOfWeek = orderDate.getDay();
+            return typeMatches &&
+              Array.isArray(r.daysOfWeek) &&
+              r.daysOfWeek.includes(dayOfWeek) &&
+              parseTimeToMinutes(r.startTime) <= midPoint &&
+              parseTimeToMinutes(r.endTime) >= midPoint;
+          });
+          hourlyRate = matchedRule ? matchedRule.pricePerHour : defaultRate;
+        }
+
+        // Tìm TimeSlot tương ứng trong DB để lấy nhãn mô tả
+        const matchedSlot = (matchedPrice?.timeSlotId && typeof matchedPrice.timeSlotId === 'object')
+          ? matchedPrice.timeSlotId
+          : allTimeSlots.find((ts) => {
+              const sMin = parseTimeToMinutes(ts.startTime);
+              const eMin = parseTimeToMinutes(ts.endTime);
+              return sMin <= midPoint && eMin >= midPoint;
+            });
+
+        let slotLabel = matchedSlot?.label || '';
+        let slotLabelName = '';
+        if (slotLabel) {
+          const match = slotLabel.match(/\((.*?)\)/);
+          slotLabelName = match ? match[1].trim() : slotLabel.trim();
+        }
+
+        // Nhận diện giờ cao điểm từ PriceRule / nhãn TimeSlot trong database hoặc độ chênh lệch giá so với giá cơ sở
+        const ruleIsPeak = matchedRule && /vàng|cao điểm|peak/i.test(matchedRule.name + ' ' + (matchedRule.description || ''));
+        const slotIsPeak = /vàng|cao điểm|peak/i.test(slotLabel);
+        const isPeak = Boolean(ruleIsPeak || slotIsPeak || (!isWeekend && hourlyRate > defaultRate));
+
+        let priceType = '';
+        if (matchedRule?.name) {
+          priceType = isPeak && !/cao điểm|vàng/i.test(matchedRule.name)
+            ? `Giờ cao điểm (${matchedRule.name})`
+            : matchedRule.name;
+        } else if (slotLabelName) {
+          priceType = slotLabelName;
+        } else if (isPeak) {
+          priceType = 'Giờ cao điểm (Giờ vàng)';
+        } else if (isWeekend) {
+          priceType = 'Cuối tuần';
+        } else {
+          priceType = 'Giờ thấp điểm (Giờ thường)';
+        }
         const amount = Math.round(durHours * hourlyRate);
 
         rawIntervals.push({
@@ -1330,7 +1424,7 @@ class BookingService {
         price: totalBasePrice,
         discount,
         totalAmount: Math.max(0, totalBasePrice - discount),
-        paymentMethod: paymentMethod === 'VIETQR' ? 'CASH' : (paymentMethod || 'CASH'),
+        paymentMethod: paymentMethod || 'CASH',
         paymentStatus: 'UNPAID',
         status: finalStatus,
         items: bookingItems,
