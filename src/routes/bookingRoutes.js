@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const bookingController = require('../controllers/bookingController');
-const optionalAuth = require('../middlewares/optionalAuthMiddleware');
 const { authenticateUser, authorizeRole, optionalAuth } = require('../middlewares/authMiddleware');
 
 // 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
