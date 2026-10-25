@@ -1,50 +1,58 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user');
-const { sendError } = require('../utils/response');
 
-module.exports = async (req, res, next) => {
+// 1. Xác thực Token đăng nhập bắt buộc
+exports.authenticateUser = async (req, res, next) => {
+  const authHeader = req.header('Authorization');
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Access Denied: No token provided' });
+  }
+
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return sendError(res, 'Vui lòng đăng nhập để thực hiện chức năng này!', 401);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'badminton_secret_key_2026');
+    req.user = await User.findById(decoded.userId).select('-password');
+
+    if (!req.user || req.user.status !== 'ACTIVE') {
+      return res.status(401).json({ message: 'User not found or account is inactive' });
     }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'badminton_secret_key_2026'
-      );
-    } catch (err) {
-      return sendError(res, 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại!', 401);
-    }
-
-    const currentUser = await User.findById(decoded.userId);
-    if (!currentUser) {
-      return sendError(res, 'Tài khoản người dùng không tồn tại hoặc đã bị xóa!', 401);
-    }
-
-    if (currentUser.status !== 'ACTIVE') {
-      return sendError(
-        res,
-        currentUser.lockReason || 'Tài khoản của bạn đã bị vô hiệu hóa hoặc bị khóa. Vui lòng liên hệ quản trị viên!',
-        403
-      );
-    }
-
-    req.user = {
-      userId: currentUser._id.toString(),
-      _id: currentUser._id,
-      email: currentUser.email,
-      fullName: currentUser.fullName,
-      phone: currentUser.phone,
-      role: currentUser.role,
-      status: currentUser.status
-    };
-
     next();
   } catch (error) {
-    return sendError(res, error.message || 'Lỗi xác thực hệ thống!', 500);
+    return res.status(403).json({ message: 'Invalid Token' });
   }
+};
+
+// 2. Phân role truy cập trang (Hỗ trợ cả mảng hoặc chuỗi role)
+exports.authorizeRole = (roles) => {
+  const allowedRoles = Array.isArray(roles) ? roles : [roles];
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Forbidden: Insufficient permissions' });
+    }
+    next();
+  };
+};
+
+// 3. Hàm chuyên check quyền Admin cho các thao tác CRUD (Tạo, Sửa, Xóa)
+exports.checkAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ message: 'Forbidden: Yêu cầu quyền Quản trị viên (Admin) để thao tác!' });
+  }
+  next();
+};
+
+// 4. Xác thực tùy chọn (dành cho API như Đặt sân: có token thì gán req.user, không có thì bỏ qua)
+exports.optionalAuth = async (req, res, next) => {
+  const authHeader = req.header('Authorization');
+  const token = authHeader && authHeader.split(' ')[1];
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'badminton_secret_key_2026');
+      req.user = await User.findById(decoded.userId).select('-password');
+    } catch (e) {
+      // Bỏ qua lỗi token
+    }
+  }
+  next();
 };

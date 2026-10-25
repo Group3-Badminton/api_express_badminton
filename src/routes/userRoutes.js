@@ -1,12 +1,13 @@
 const router = require('express').Router();
 const userController = require('../controllers/userController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const adminMiddleware = require('../middlewares/adminMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
 
-router.get('/profile', authMiddleware, userController.getProfile);
-router.put('/profile', authMiddleware, userController.updateProfile);
-router.get('/customers', authMiddleware, staffOrAdminMiddleware, userController.getCustomers);
-router.patch('/customers/:id/unlock', authMiddleware, adminMiddleware, userController.unlockCustomer);
+// Xem và sửa hồ sơ cá nhân (người dùng đã đăng nhập)
+router.get('/profile', authenticateUser, userController.getProfile);
+router.put('/profile', authenticateUser, userController.updateProfile);
+
+// Danh sách khách hàng và mở khóa tài khoản
+router.get('/customers', authenticateUser, authorizeRole(['ADMIN', 'STAFF']), userController.getCustomers);
+router.patch('/customers/:id/unlock', authenticateUser, checkAdmin, userController.unlockCustomer);
 
 module.exports = router;

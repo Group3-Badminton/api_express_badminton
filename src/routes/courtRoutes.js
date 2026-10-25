@@ -1,25 +1,17 @@
 const router = require('express').Router();
 const courtController = require('../controllers/courtController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const adminMiddleware = require('../middlewares/adminMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
 
-// Tất cả thao tác yêu cầu đăng nhập và tài khoản ACTIVE
-router.use(authMiddleware);
+// Tất cả thao tác trong trang Quản lý sân yêu cầu đăng nhập
+router.use(authenticateUser);
 
-// UC-9.1: Danh sách (STAFF & ADMIN) / UC-9.6: Tìm kiếm & lọc (ADMIN only - kiểm tra trong controller)
-router.get('/', staffOrAdminMiddleware, courtController.getCourts);
+// UC-9.1 & UC-9.2: Xem danh sách và chi tiết sân (STAFF & ADMIN)
+router.get('/', authorizeRole(['ADMIN', 'STAFF']), courtController.getCourts);
+router.get('/:id', authorizeRole(['ADMIN', 'STAFF']), courtController.getCourtById);
 
-// UC-9.2: Chi tiết sân (STAFF & ADMIN)
-router.get('/:id', staffOrAdminMiddleware, courtController.getCourtById);
-
-// UC-9.3: Tạo sân (ADMIN only)
-router.post('/', adminMiddleware, courtController.createCourt);
-
-// UC-9.4: Cập nhật thông tin sân (ADMIN only)
-router.patch('/:id', adminMiddleware, courtController.updateCourt);
-
-// UC-9.5: Vô hiệu hóa sân (ADMIN only)
-router.patch('/:id/deactivate', adminMiddleware, courtController.deactivateCourt);
+// UC-9.3, UC-9.4, UC-9.5: Thao tác CRUD Tạo, Sửa, Vô hiệu hóa sân (CHỈ ADMIN)
+router.post('/', checkAdmin, courtController.createCourt);
+router.patch('/:id', checkAdmin, courtController.updateCourt);
+router.patch('/:id/deactivate', checkAdmin, courtController.deactivateCourt);
 
 module.exports = router;

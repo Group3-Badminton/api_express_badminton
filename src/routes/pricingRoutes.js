@@ -1,28 +1,21 @@
 const router = require('express').Router();
 const pricingController = require('../controllers/pricingController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const adminMiddleware = require('../middlewares/adminMiddleware');
+const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
 
-// Tất cả các thao tác quản lý quy tắc giá trong UC-18 yêu cầu đăng nhập và có quyền Admin
-router.use(authMiddleware);
-router.use(adminMiddleware);
+// 1. API Public: Lấy danh mục loại sân và bảng giá cho HomePage
+router.get('/overview', pricingController.getPricingOverview);
 
-// UC-18.1: Lấy danh sách quy tắc giá
-router.get('/', pricingController.getAllPriceRules);
+// 2. Các API quản lý quy tắc giá yêu cầu đăng nhập
+router.use(authenticateUser);
 
-// Lấy chi tiết quy tắc giá
-router.get('/:id', pricingController.getPriceRuleById);
+// Xem quy tắc giá (STAFF & ADMIN)
+router.get('/', authorizeRole(['ADMIN', 'STAFF']), pricingController.getAllPriceRules);
+router.get('/:id', authorizeRole(['ADMIN', 'STAFF']), pricingController.getPriceRuleById);
 
-// UC-18.2: Tạo quy tắc giá mới
-router.post('/', pricingController.createPriceRule);
-
-// UC-18.3: Cập nhật quy tắc giá
-router.put('/:id', pricingController.updatePriceRule);
-
-// UC-18.4: Vô hiệu hóa quy tắc giá (Soft deactivate, giữ lịch sử)
-router.patch('/:id/deactivate', pricingController.deactivatePriceRule);
-
-// Kích hoạt lại quy tắc giá (nếu cần khôi phục)
-router.patch('/:id/activate', pricingController.activatePriceRule);
+// Thao tác CRUD Tạo, Sửa, Vô hiệu hóa, Kích hoạt bảng giá (CHỈ ADMIN)
+router.post('/', checkAdmin, pricingController.createPriceRule);
+router.put('/:id', checkAdmin, pricingController.updatePriceRule);
+router.patch('/:id/deactivate', checkAdmin, pricingController.deactivatePriceRule);
+router.patch('/:id/activate', checkAdmin, pricingController.activatePriceRule);
 
 module.exports = router;

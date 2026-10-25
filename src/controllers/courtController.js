@@ -13,6 +13,8 @@ const escapeRegex = (string) => {
 const sanitizeCourt = (court) => ({
   _id: court._id,
   name: court.name,
+  courtName: court.courtName || court.name,
+  courtType: court.courtType || 'STANDARD',
   status: court.status,
   description: court.description || '',
   openingTime: court.openingTime || '05:00',
@@ -108,7 +110,7 @@ exports.getCourtById = async (req, res) => {
  */
 exports.createCourt = async (req, res) => {
   try {
-    const { name, description, openingTime, closingTime } = req.body || {};
+    const { name, courtType, description, openingTime, closingTime } = req.body || {};
     const errors = {};
 
     const cleanName = typeof name === 'string' ? name.trim() : '';
@@ -156,6 +158,8 @@ exports.createCourt = async (req, res) => {
 
     const newCourt = await Court.create({
       name: cleanName,
+      courtName: cleanName,
+      courtType: courtType || 'STANDARD',
       description: cleanDesc,
       openingTime: cleanOpening,
       closingTime: cleanClosing,
@@ -189,7 +193,7 @@ exports.updateCourt = async (req, res) => {
       return sendError(res, 'The selected court is unavailable.', 404);
     }
 
-    const { name, description, openingTime, closingTime } = req.body || {};
+    const { name, courtType, description, openingTime, closingTime } = req.body || {};
     const errors = {};
 
     const cleanName = typeof name === 'string' ? name.trim() : '';
@@ -240,6 +244,7 @@ exports.updateCourt = async (req, res) => {
     targetCourt.description = cleanDesc;
     targetCourt.openingTime = cleanOpening;
     targetCourt.closingTime = cleanClosing;
+    if (courtType) targetCourt.courtType = courtType;
     await targetCourt.save();
 
     return sendSuccess(res, sanitizeCourt(targetCourt), 'Cập nhật thông tin sân thành công!', 200);
