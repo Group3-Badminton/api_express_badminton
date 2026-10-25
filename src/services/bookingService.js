@@ -23,6 +23,7 @@ const formatMinutesToTime = (min) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
+
 const isPendingBooking = (status) => status === 'PENDING' || status === 'PENDING_APPROVAL';
 const CUSTOMER_CANCELLATION_LIMIT = 3;
 const CUSTOMER_CANCELLATION_LOCK_REASON =
@@ -470,10 +471,12 @@ class BookingService {
     // Lọc theo sân
     if (courtId && courtId !== 'ALL') {
       filter.$and = filter.$and || [];
-      filter.$and.push({ $or: [
-        { courtId: courtId },
-        { 'items.courtId': courtId }
-      ] });
+      filter.$and.push({
+        $or: [
+          { courtId: courtId },
+          { 'items.courtId': courtId }
+        ]
+      });
     }
 
     // Lọc theo ngày đặt sân
@@ -483,10 +486,12 @@ class BookingService {
       const end = new Date(bookingDate);
       end.setHours(23, 59, 59, 999);
       filter.$and = filter.$and || [];
-      filter.$and.push({ $or: [
-        { bookingDate: { $gte: start, $lte: end } },
-        { items: { $elemMatch: { bookingDate: { $gte: start, $lte: end } } } }
-      ] });
+      filter.$and.push({
+        $or: [
+          { bookingDate: { $gte: start, $lte: end } },
+          { items: { $elemMatch: { bookingDate: { $gte: start, $lte: end } } } }
+        ]
+      });
     } else if (startDate || endDate) {
       const dateRange = {};
       if (startDate) {
@@ -498,10 +503,12 @@ class BookingService {
         dateRange.$lte.setHours(23, 59, 59, 999);
       }
       filter.$and = filter.$and || [];
-      filter.$and.push({ $or: [
-        { bookingDate: dateRange },
-        { items: { $elemMatch: { bookingDate: dateRange } } }
-      ] });
+      filter.$and.push({
+        $or: [
+          { bookingDate: dateRange },
+          { items: { $elemMatch: { bookingDate: dateRange } } }
+        ]
+      });
     }
 
     // Tìm kiếm theo từ khóa (Mã đơn hoặc Tên/SĐT/Email khách hàng)
@@ -518,10 +525,12 @@ class BookingService {
       const userIds = userMatches.map((u) => u._id);
 
       filter.$and = filter.$and || [];
-      filter.$and.push({ $or: [
-        { bookingCode: { $regex: keyword, $options: 'i' } },
-        { customerId: { $in: userIds } }
-      ] });
+      filter.$and.push({
+        $or: [
+          { bookingCode: { $regex: keyword, $options: 'i' } },
+          { customerId: { $in: userIds } }
+        ]
+      });
     }
 
     // Sắp xếp
@@ -721,9 +730,7 @@ class BookingService {
     }).select('courtId bookingDate startTime endTime bookingCode status items').lean();
 
     const courtPricesMin = prices.length > 0 ? Math.min(...prices.map((p) => p.price)) : null;
-    const candidateRules = priceRules.filter((r) =>
-      r.courtType === 'ALL' || (court.courtType && court.courtType.toUpperCase().includes(r.courtType))
-    );
+    const candidateRules = priceRules.filter((r) => matchCourtType(r.courtType, court));
     const dbDefaultPrice = candidateRules.length > 0
       ? Math.min(...candidateRules.map((r) => r.pricePerHour))
       : (priceRules.length > 0 ? Math.min(...priceRules.map((r) => r.pricePerHour)) : null);
@@ -741,8 +748,7 @@ class BookingService {
         slotPrice = priceDoc.price;
       } else {
         const matchedRule = priceRules.find((r) => {
-          const typeMatches = r.courtType === 'ALL' ||
-            (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+          const typeMatches = matchCourtType(r.courtType, court);
           return typeMatches && r.startTime <= slot.startTime && r.endTime >= slot.endTime;
         });
         slotPrice = matchedRule ? matchedRule.pricePerHour : defaultPrice;
@@ -1013,8 +1019,7 @@ class BookingService {
       // Xác định đơn giá cơ sở động từ bảng giá Price của sân hoặc PriceRule trong database
       const courtPricesMin = courtPrices.length > 0 ? Math.min(...courtPrices.map((p) => p.price)) : null;
       const candidateRules = allPriceRules.filter((r) => {
-        const typeMatches = r.courtType === 'ALL' ||
-          (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+        const typeMatches = matchCourtType(r.courtType, court);
         const dayOfWeek = orderDate.getDay();
         return typeMatches && Array.isArray(r.daysOfWeek) && r.daysOfWeek.includes(dayOfWeek);
       });
@@ -1043,8 +1048,7 @@ class BookingService {
           hourlyRate = matchedPrice.price;
         } else {
           matchedRule = allPriceRules.find((r) => {
-            const typeMatches = r.courtType === 'ALL' ||
-              (court.courtType && court.courtType.toUpperCase().includes(r.courtType));
+            const typeMatches = matchCourtType(r.courtType, court);
             const dayOfWeek = orderDate.getDay();
             return typeMatches &&
               Array.isArray(r.daysOfWeek) &&
@@ -1059,10 +1063,10 @@ class BookingService {
         const matchedSlot = (matchedPrice?.timeSlotId && typeof matchedPrice.timeSlotId === 'object')
           ? matchedPrice.timeSlotId
           : allTimeSlots.find((ts) => {
-              const sMin = parseTimeToMinutes(ts.startTime);
-              const eMin = parseTimeToMinutes(ts.endTime);
-              return sMin <= midPoint && eMin >= midPoint;
-            });
+            const sMin = parseTimeToMinutes(ts.startTime);
+            const eMin = parseTimeToMinutes(ts.endTime);
+            return sMin <= midPoint && eMin >= midPoint;
+          });
 
         let slotLabel = matchedSlot?.label || '';
         let slotLabelName = '';
