@@ -5,7 +5,7 @@ const PlayingSession = require('../models/playingSession');
 const Court = require('../models/court');
 const { sendSuccess, sendError } = require('../utils/response');
 
-function calculateVoucherDiscount(voucher, orderAmount) {
+function calculateVoucherDiscount(voucher, orderAmount, eligibleAmount = null) {
   const now = new Date();
   if (!voucher || voucher.status !== 'ACTIVE') {
     throw new Error('Mã giảm giá không tồn tại hoặc đang bị tạm khóa!');
@@ -21,22 +21,23 @@ function calculateVoucherDiscount(voucher, orderAmount) {
     throw new Error('Mã giảm giá đã hết lượt sử dụng!');
   }
 
+  const baseAmount = eligibleAmount !== null ? eligibleAmount : orderAmount;
   const minSpend = Number(voucher.minInvoiceAmount) || 0;
-  if (orderAmount < minSpend) {
+  if (baseAmount < minSpend) {
     throw new Error(`Đơn hàng chưa đạt giá trị tối thiểu (${minSpend.toLocaleString('vi-VN')} đ) để áp dụng mã giảm giá này!`);
   }
 
   let discount = 0;
   if (voucher.discountType === 'PERCENTAGE') {
-    discount = Math.round((orderAmount * voucher.discountValue) / 100);
+    discount = Math.round((baseAmount * voucher.discountValue) / 100);
     if (voucher.maxDiscountAmount && discount > voucher.maxDiscountAmount) {
       discount = voucher.maxDiscountAmount;
     }
   } else {
-    discount = Math.min(orderAmount, voucher.discountValue);
+    discount = Math.min(baseAmount, voucher.discountValue);
   }
 
-  return Math.max(0, discount);
+  return Math.max(0, Math.min(discount, orderAmount));
 }
 
 exports.getInvoices = async (req, res) => {
