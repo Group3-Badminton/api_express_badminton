@@ -23,6 +23,22 @@ const formatMinutesToTime = (min) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
+// Chuẩn hóa loại sân về các phân khúc chuẩn
+const normalizeCourtType = (type) => {
+  if (!type) return 'STANDARD';
+  const t = String(type).trim().toUpperCase();
+  if (t === 'VIP' || t.includes('VIP') || t.includes('GỖ')) return 'VIP';
+  if (t === 'PREMIUM' || t.includes('PREMIUM') || t.includes('THI ĐẤU') || t.includes('PVC')) return 'PREMIUM';
+  return 'STANDARD';
+};
+
+// Khớp loại sân giữa rule (PriceRule) và sân (Court)
+const matchCourtType = (ruleCourtType, court) => {
+  if (!ruleCourtType || ruleCourtType === 'ALL') return true;
+  const courtType = court?.courtType || 'STANDARD';
+  return normalizeCourtType(ruleCourtType) === normalizeCourtType(courtType);
+};
+
 
 const isPendingBooking = (status) => status === 'PENDING' || status === 'PENDING_APPROVAL';
 const CUSTOMER_CANCELLATION_LIMIT = 3;
@@ -687,11 +703,15 @@ class BookingService {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
 
-    const [timeSlots, prices, priceRules] = await Promise.all([
+    const [timeSlots, prices, allCourtPrices, priceRules] = await Promise.all([
       TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean(),
       Price.find({
         courtId,
         dayType,
+        status: 'ACTIVE'
+      }).lean(),
+      Price.find({
+        courtId,
         status: 'ACTIVE'
       }).lean(),
       PriceRule.find({
@@ -729,7 +749,8 @@ class BookingService {
       ]
     }).select('courtId bookingDate startTime endTime bookingCode status items').lean();
 
-    const courtPricesMin = prices.length > 0 ? Math.min(...prices.map((p) => p.price)) : null;
+    const courtPricesPool = prices.length > 0 ? prices : allCourtPrices;
+    const courtPricesMin = courtPricesPool.length > 0 ? Math.min(...courtPricesPool.map((p) => p.price)) : null;
     const candidateRules = priceRules.filter((r) => matchCourtType(r.courtType, court));
     const dbDefaultPrice = candidateRules.length > 0
       ? Math.min(...candidateRules.map((r) => r.pricePerHour))
@@ -738,6 +759,10 @@ class BookingService {
 
     const slotDetails = timeSlots.map((slot) => {
       const priceDoc = prices.find(
+        (p) =>
+          (p.timeSlotId && p.timeSlotId.toString() === slot._id.toString()) ||
+          p.timeSlot.includes(slot.startTime)
+      ) || allCourtPrices.find(
         (p) =>
           (p.timeSlotId && p.timeSlotId.toString() === slot._id.toString()) ||
           p.timeSlot.includes(slot.startTime)
@@ -961,8 +986,7 @@ class BookingService {
     const [allPrices, allPriceRules, allTimeSlots] = await Promise.all([
       Price.find({
         courtId: { $in: uniqueCourtIds },
-        status: 'ACTIVE',
-        $or: priceDateConditions
+        status: 'ACTIVE'
       }).populate('timeSlotId').lean(),
       PriceRule.find({ status: 'ACTIVE' }).lean(),
       TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean()
@@ -992,10 +1016,15 @@ class BookingService {
         (!p.effectiveFrom || new Date(p.effectiveFrom) <= orderEndOfDay) &&
         (!p.effectiveTo || new Date(p.effectiveTo) >= orderStartOfDay)
       );
+      const courtAllActivePrices = allPrices.filter((p) =>
+        p.courtId.toString() === cIdStr &&
+        (!p.effectiveFrom || new Date(p.effectiveFrom) <= orderEndOfDay) &&
+        (!p.effectiveTo || new Date(p.effectiveTo) >= orderStartOfDay)
+      );
 
       // Thu thập các mốc phân chia khung giá (boundaries) từ Price và PriceRule trong database
       const points = new Set([bStart, bEnd]);
-      courtPrices.forEach((p) => {
+      courtAllActivePrices.forEach((p) => {
         if (p.timeSlot && p.timeSlot.includes('-')) {
           const [s, e] = p.timeSlot.split('-').map((t) => t.trim());
           const sMin = parseTimeToMinutes(s);
@@ -1017,7 +1046,9 @@ class BookingService {
       const rawIntervals = [];
 
       // Xác định đơn giá cơ sở động từ bảng giá Price của sân hoặc PriceRule trong database
-      const courtPricesMin = courtPrices.length > 0 ? Math.min(...courtPrices.map((p) => p.price)) : null;
+      const courtPricesMin = courtPrices.length > 0
+        ? Math.min(...courtPrices.map((p) => p.price))
+        : (courtAllActivePrices.length > 0 ? Math.min(...courtAllActivePrices.map((p) => p.price)) : null);
       const candidateRules = allPriceRules.filter((r) => {
         const typeMatches = matchCourtType(r.courtType, court);
         const dayOfWeek = orderDate.getDay();
@@ -1056,7 +1087,17 @@ class BookingService {
               parseTimeToMinutes(r.startTime) <= midPoint &&
               parseTimeToMinutes(r.endTime) >= midPoint;
           });
-          hourlyRate = matchedRule ? matchedRule.pricePerHour : defaultRate;
+          if (matchedRule) {
+            hourlyRate = matchedRule.pricePerHour;
+          } else {
+            // Tìm trong bảng giá của sân từ MongoDB cho khung giờ này (ví dụ bảng giá ngày thường)
+            const fallbackSlotPrice = courtAllActivePrices.find((p) => {
+              if (!p.timeSlot || !p.timeSlot.includes('-')) return false;
+              const [s, e] = p.timeSlot.split('-').map((t) => t.trim());
+              return parseTimeToMinutes(s) <= midPoint && parseTimeToMinutes(e) >= midPoint;
+            });
+            hourlyRate = fallbackSlotPrice ? fallbackSlotPrice.price : defaultRate;
+          }
         }
 
         // Tìm TimeSlot tương ứng trong DB để lấy nhãn mô tả
