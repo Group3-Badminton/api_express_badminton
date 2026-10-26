@@ -71,8 +71,13 @@ class BookingController {
   // 6. Kiểm tra và áp dụng mã giảm giá (Voucher)
   async validateVoucher(req, res) {
     try {
-      const { voucherCode, orderAmount } = req.body;
-      const result = await bookingService.validateVoucher(voucherCode, orderAmount);
+      const { voucherCode, orderAmount, courtBreakdowns, courtOrders, courtIds, courtTypes } = req.body;
+      const result = await bookingService.validateVoucher(voucherCode, orderAmount, {
+        courtBreakdowns,
+        courtOrders,
+        courtIds,
+        courtTypes
+      });
       return sendSuccess(res, result, 'Áp dụng mã giảm giá thành công!', 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);

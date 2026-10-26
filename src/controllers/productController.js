@@ -94,7 +94,7 @@ class ProductController {
    */
   async stockIn(req, res) {
     try {
-      const userId = req.user.userId;
+      const userId = req.user?._id || req.user?.id || req.user?.userId;
       const result = await productService.stockIn(req.params.id, req.body, userId);
       return sendSuccess(res, result, 'Ghi nhận nhập kho thành công!');
     } catch (error) {

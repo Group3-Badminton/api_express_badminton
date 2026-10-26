@@ -36,6 +36,7 @@ class VoucherService {
       search,
       status,
       validityStatus,
+      courtType,
       startDateFrom,
       startDateTo,
       endDateFrom,
@@ -55,6 +56,11 @@ class VoucherService {
         { code: { $regex: cleanSearch, $options: 'i' } },
         { name: { $regex: cleanSearch, $options: 'i' } }
       ];
+    }
+
+    // Lọc theo loại sân áp dụng
+    if (courtType && courtType !== 'ALL') {
+      query.applicableCourtTypes = { $in: [courtType, 'ALL'] };
     }
 
     // Lọc theo trạng thái quản trị (ACTIVE / INACTIVE)
@@ -171,6 +177,7 @@ class VoucherService {
       startDate,
       endDate,
       usageLimit,
+      applicableCourtTypes = ['ALL'],
       description
     } = data;
 
@@ -270,6 +277,18 @@ class VoucherService {
       throw err;
     }
 
+    let normalizedCourtTypes = ['ALL'];
+    if (Array.isArray(applicableCourtTypes) && applicableCourtTypes.length > 0) {
+      if (applicableCourtTypes.includes('ALL')) {
+        normalizedCourtTypes = ['ALL'];
+      } else {
+        normalizedCourtTypes = [...new Set(applicableCourtTypes.map((t) => String(t).trim().toUpperCase()))];
+      }
+    } else if (typeof applicableCourtTypes === 'string' && applicableCourtTypes.trim()) {
+      const parts = applicableCourtTypes.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
+      normalizedCourtTypes = parts.includes('ALL') ? ['ALL'] : parts;
+    }
+
     const voucher = await Voucher.create({
       code: cleanCode,
       name: cleanName,
@@ -280,6 +299,7 @@ class VoucherService {
       startDate: start,
       endDate: end,
       usageLimit: parsedUsageLimit,
+      applicableCourtTypes: normalizedCourtTypes,
       usedCount: 0,
       status: 'ACTIVE',
       description: description ? description.trim() : '',
@@ -432,6 +452,21 @@ class VoucherService {
           throw err;
         }
         voucher.usageLimit = parsedLimit;
+      }
+    }
+
+    if (data.applicableCourtTypes !== undefined) {
+      if (Array.isArray(data.applicableCourtTypes) && data.applicableCourtTypes.length > 0) {
+        if (data.applicableCourtTypes.includes('ALL')) {
+          voucher.applicableCourtTypes = ['ALL'];
+        } else {
+          voucher.applicableCourtTypes = [...new Set(data.applicableCourtTypes.map((t) => String(t).trim().toUpperCase()))];
+        }
+      } else if (typeof data.applicableCourtTypes === 'string' && data.applicableCourtTypes.trim()) {
+        const parts = data.applicableCourtTypes.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
+        voucher.applicableCourtTypes = parts.includes('ALL') ? ['ALL'] : parts;
+      } else {
+        voucher.applicableCourtTypes = ['ALL'];
       }
     }
 
