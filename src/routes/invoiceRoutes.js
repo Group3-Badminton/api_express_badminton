@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const invoiceController = require('../controllers/invoiceController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
-router.use(authMiddleware, staffOrAdminMiddleware);
+// Tất cả các route của Invoice đều yêu cầu quyền Staff hoặc Admin
+router.use(authenticateUser, authorizeRole(['ADMIN', 'STAFF']));
 
 router.get('/', invoiceController.getInvoices);
 router.get('/:id', invoiceController.getInvoiceById);

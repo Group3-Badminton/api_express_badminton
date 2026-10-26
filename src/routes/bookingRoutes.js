@@ -7,9 +7,6 @@ const {
   optionalAuth
 } = require('../middlewares/authMiddleware');
 
-const staffOrAdminMiddleware = authorizeRole(['STAFF', 'ADMIN']);
-const { authenticateUser, authorizeRole, optionalAuth } = require('../middlewares/authMiddleware');
-
 // 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
 router.get('/courts', optionalAuth, bookingController.getCourts);
 
