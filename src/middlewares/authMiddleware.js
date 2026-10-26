@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 
 // 1. Xác thực Token đăng nhập bắt buộc
-exports.authenticateUser = async (req, res, next) => {
+const authenticateUser = async (req, res, next) => {
   const authHeader = req.header('Authorization');
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -24,7 +24,7 @@ exports.authenticateUser = async (req, res, next) => {
 };
 
 // 2. Phân role truy cập trang (Hỗ trợ cả mảng hoặc chuỗi role)
-exports.authorizeRole = (roles) => {
+const authorizeRole = (roles) => {
   const allowedRoles = Array.isArray(roles) ? roles : [roles];
   return (req, res, next) => {
     if (!req.user || !allowedRoles.includes(req.user.role)) {
@@ -35,7 +35,7 @@ exports.authorizeRole = (roles) => {
 };
 
 // 3. Hàm chuyên check quyền Admin cho các thao tác CRUD (Tạo, Sửa, Xóa)
-exports.checkAdmin = (req, res, next) => {
+const checkAdmin = (req, res, next) => {
   if (!req.user || req.user.role !== 'ADMIN') {
     return res.status(403).json({ message: 'Forbidden: Yêu cầu quyền Quản trị viên (Admin) để thao tác!' });
   }
@@ -43,7 +43,7 @@ exports.checkAdmin = (req, res, next) => {
 };
 
 // 4. Xác thực tùy chọn (dành cho API như Đặt sân: có token thì gán req.user, không có thì bỏ qua)
-exports.optionalAuth = async (req, res, next) => {
+const optionalAuth = async (req, res, next) => {
   const authHeader = req.header('Authorization');
   const token = authHeader && authHeader.split(' ')[1];
   if (token) {
@@ -61,3 +61,9 @@ exports.optionalAuth = async (req, res, next) => {
   }
   next();
 };
+
+module.exports = authenticateUser;
+module.exports.authenticateUser = authenticateUser;
+module.exports.authorizeRole = authorizeRole;
+module.exports.checkAdmin = checkAdmin;
+module.exports.optionalAuth = optionalAuth;
