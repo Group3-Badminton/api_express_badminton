@@ -164,6 +164,10 @@ const bookingSchema = new mongoose.Schema({
   note: {
     type: String,
     default: ''
+  },
+  cancellationReason: {
+    type: String,
+    default: ''
   }
 }, { timestamps: true });
 

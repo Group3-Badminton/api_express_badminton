@@ -72,7 +72,8 @@ const invoiceSchema = new mongoose.Schema({
     overtimeFee: { type: Number, default: 0 },
     rentalDamageFee: { type: Number, default: 0 },
     extensionFee: { type: Number, default: 0 },
-    consumableFee: { type: Number, default: 0 }
+    consumableFee: { type: Number, default: 0 },
+    prepaidDeposit: { type: Number, default: 0 }
   },
   subtotal: {
     type: Number,

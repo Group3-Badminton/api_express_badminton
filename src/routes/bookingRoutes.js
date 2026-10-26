@@ -8,19 +8,19 @@ const {
 } = require('../middlewares/authMiddleware');
 
 // 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
-router.get('/courts', optionalAuth, bookingController.getCourts);
+router.get('/courts', bookingController.getCourts);
 
 // 2. Danh sách khung giờ cố định (cho phép xem công khai)
-router.get('/time-slots', optionalAuth, bookingController.getTimeSlots);
+router.get('/time-slots', bookingController.getTimeSlots);
 
 // 3. Kiểm tra tình trạng khung giờ còn trống & Bảng giá theo Sân và Ngày (cho phép xem công khai)
-router.get('/availability', optionalAuth, bookingController.getCourtAvailability);
+router.get('/availability', bookingController.getCourtAvailability);
 
 // 4. Kiểm tra và áp dụng mã giảm giá (Voucher)
-router.post('/validate-voucher', optionalAuth, bookingController.validateVoucher);
+router.post('/validate-voucher', bookingController.validateVoucher);
 
 // Tính giá chi tiết cho từng sân và từng khung giờ (tách cao điểm / thấp điểm)
-router.post('/calculate-price', optionalAuth, bookingController.calculatePrice);
+router.post('/calculate-price', bookingController.calculatePrice);
 
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
 router.get('/', authenticateUser, bookingController.getAllBookings);
