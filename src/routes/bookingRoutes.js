@@ -1,9 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bookingController = require('../controllers/bookingController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const optionalAuth = require('../middlewares/optionalAuthMiddleware');
-const staffOrAdminMiddleware = require('../middlewares/staffOrAdminMiddleware');
+const { authenticateUser, authorizeRole, optionalAuth } = require('../middlewares/authMiddleware');
 
 // 1. Danh sách sân phục vụ bộ lọc và trang đặt sân (cho phép xem công khai)
 router.get('/courts', optionalAuth, bookingController.getCourts);
@@ -21,22 +19,22 @@ router.post('/validate-voucher', optionalAuth, bookingController.validateVoucher
 router.post('/calculate-price', optionalAuth, bookingController.calculatePrice);
 
 // 5. Lấy danh sách bookings (tìm kiếm, lọc, phân trang, thống kê)
-router.get('/', authMiddleware, bookingController.getAllBookings);
+router.get('/', authenticateUser, bookingController.getAllBookings);
 
 // Danh sách khách hàng phục vụ nhân viên đặt sân (yêu cầu quyền Staff hoặc Admin)
-router.get('/customers', authMiddleware, staffOrAdminMiddleware, bookingController.getCustomers);
+router.get('/customers', authenticateUser, authorizeRole(['ADMIN', 'STAFF']), bookingController.getCustomers);
 
 // 6. Lấy chi tiết đơn đặt sân theo ID
-router.get('/:id', authMiddleware, bookingController.getBookingById);
+router.get('/:id', authenticateUser, bookingController.getBookingById);
 
 // 7. Cập nhật trạng thái đơn đặt sân
-router.patch('/:id/status', authMiddleware, bookingController.updateBookingStatus);
+router.patch('/:id/status', authenticateUser, bookingController.updateBookingStatus);
 
 // AF1: Thay đổi thông tin đặt sân (Change Booking Information)
-router.patch('/:id/change-info', authMiddleware, bookingController.changeBookingInfo);
+router.patch('/:id/change-info', authenticateUser, bookingController.changeBookingInfo);
 
 // AF2: Từ chối yêu cầu đặt sân (Reject Booking)
-router.patch('/:id/reject', authMiddleware, staffOrAdminMiddleware, bookingController.rejectBooking);
+router.patch('/:id/reject', authenticateUser, authorizeRole(['ADMIN', 'STAFF']), bookingController.rejectBooking);
 
 // 8. Tạo mới đơn đặt sân (hỗ trợ cả khách đăng nhập lẫn khách vãng lai)
 router.post('/', optionalAuth, bookingController.createBooking);
