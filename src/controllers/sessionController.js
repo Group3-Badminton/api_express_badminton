@@ -3,6 +3,8 @@ const Booking = require('../models/booking');
 const Court = require('../models/court');
 const User = require('../models/user');
 const TimeSlot = require('../models/timeSlot');
+const Price = require('../models/price');
+const PriceRule = require('../models/priceRule');
 const Invoice = require('../models/invoice');
 const Product = require('../models/product');
 const Notification = require('../models/notification');
@@ -13,9 +15,51 @@ const {
   scheduleAutoCleanFinish
 } = require('../schedulers/sessionScheduler');
 
-function getHourlyRate(date = new Date()) {
-  const day = new Date(date).getDay();
-  return (day === 0 || day === 6) ? 140000 : 100000;
+// Tra cứu giá sân theo giờ từ MongoDB (Price / PriceRule) thay vì hardcode
+async function getHourlyRate(court, date = new Date(), timeStr = '') {
+  try {
+    const day = new Date(date).getDay();
+    const isWeekend = day === 0 || day === 6;
+    const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
+    const courtId = court?._id || court;
+
+    // 1. Tìm trong bảng Price của chính sân đó
+    if (courtId) {
+      const priceFilter = { courtId, status: 'ACTIVE' };
+      const courtPrices = await Price.find(priceFilter).lean();
+      if (courtPrices.length > 0) {
+        const exactPrice = courtPrices.find((p) => p.dayType === dayType && (!timeStr || (p.timeSlot && p.timeSlot.includes(timeStr))));
+        if (exactPrice) return exactPrice.price;
+        const dayTypePrice = courtPrices.find((p) => p.dayType === dayType);
+        if (dayTypePrice) return dayTypePrice.price;
+        return courtPrices[0].price;
+      }
+    }
+
+    // 2. Tìm trong PriceRule theo courtType
+    const courtDoc = typeof court === 'object' && court?.courtType ? court : await Court.findById(courtId).select('courtType').lean();
+    const courtType = courtDoc?.courtType || 'STANDARD';
+    const rules = await PriceRule.find({
+      status: 'ACTIVE',
+      daysOfWeek: day
+    }).lean();
+
+    if (rules.length > 0) {
+      const matchedRule = rules.find((r) => r.courtType === courtType || r.courtType === 'ALL');
+      if (matchedRule) return matchedRule.pricePerHour;
+      return rules[0].pricePerHour;
+    }
+
+    // 3. Fallback theo bảng Price chung bất kỳ trong hệ thống
+    const anyPrice = await Price.findOne({ status: 'ACTIVE' }).lean();
+    if (anyPrice) return anyPrice.price;
+
+    return 80000;
+  } catch (err) {
+    console.warn('Lỗi tra cứu giá sân từ MongoDB, dùng giá dự phòng:', err.message);
+    const day = new Date(date).getDay();
+    return (day === 0 || day === 6) ? 140000 : 100000;
+  }
 }
 
 function extractCustomerDisplayInfo(booking, fallbackUser = null) {
@@ -238,10 +282,6 @@ exports.checkInSession = async (req, res) => {
         return sendError(res, 'Sân hiện tại đang có khách chơi. Vui lòng chọn sân khác!', 400);
       }
 
-      let startTime = String(now.getHours()).padStart(2, '0') + ':00';
-      let endTime = String(now.getHours() + playingDuration).padStart(2, '0') + ':00';
-      const hourlyRate = getHourlyRate(now);
-
       if (!timeSlotId) {
         return sendError(res, 'Vui lòng chọn khung giờ cho ca đấu!', 400);
       }
@@ -253,6 +293,7 @@ exports.checkInSession = async (req, res) => {
 
       startTime = slot.startTime;
       endTime = slot.endTime;
+      const hourlyRate = await getHourlyRate(targetCourt, now, startTime);
 
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
@@ -467,7 +508,7 @@ exports.extendSession = async (req, res) => {
       }, 'Phát hiện xung đột lịch ca sau', 200);
     }
 
-    const hourlyRate = getHourlyRate(currentEndTime);
+    const hourlyRate = await getHourlyRate(session.courtId, currentEndTime);
     const extensionFee = Math.round((hourlyRate / 60) * minutes);
 
     session.scheduledEndTime = newEndTime;

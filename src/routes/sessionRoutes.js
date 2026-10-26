@@ -4,7 +4,7 @@ const sessionController = require('../controllers/sessionController');
 const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
 // Tất cả các route của Playing Session đều yêu cầu quyền Staff hoặc Admin
-router.use(authenticateUser, authorizeRole(['STAFF', 'ADMIN']));
+router.use(authenticateUser, authorizeRole(['ADMIN', 'STAFF']));
 
 router.get('/matrix', sessionController.getCourtMatrix);
 router.get('/current', sessionController.getCurrentLiveBoard);
