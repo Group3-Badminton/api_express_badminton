@@ -50,6 +50,11 @@ const optionalAuth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'badminton_secret_key_2026');
       req.user = await User.findById(decoded.userId).select('-password');
+      if (req.user && req.user.status !== 'ACTIVE') {
+        req.authAccountBlocked = true;
+        req.authAccountMessage =
+          req.user.lockReason || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!';
+      }
     } catch (e) {
       // Bỏ qua lỗi token
     }
