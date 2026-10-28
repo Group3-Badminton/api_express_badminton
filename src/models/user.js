@@ -138,4 +138,9 @@ userSchema.index(
     }
 );
 
+// Virtual field userId trỏ về _id để đảm bảo tính tương thích ngược
+userSchema.virtual('userId').get(function () {
+  return this._id;
+});
+
 module.exports = mongoose.model('User', userSchema, 'User');

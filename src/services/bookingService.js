@@ -23,6 +23,32 @@ const formatMinutesToTime = (min) => {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
+// Chuẩn hóa loại sân về các phân khúc chuẩn
+const normalizeCourtType = (type) => {
+  if (!type) return 'STANDARD';
+  const t = String(type).trim().toUpperCase();
+  if (t === 'VIP' || t.includes('VIP') || t.includes('GỖ')) return 'VIP';
+  if (t === 'PREMIUM' || t.includes('PREMIUM') || t.includes('THI ĐẤU') || t.includes('PVC')) return 'PREMIUM';
+  return 'STANDARD';
+};
+
+// Khớp loại sân giữa rule (PriceRule) và sân (Court)
+const matchCourtType = (ruleCourtType, court) => {
+  if (!ruleCourtType || ruleCourtType === 'ALL') return true;
+  const courtType = court?.courtType || 'STANDARD';
+  return normalizeCourtType(ruleCourtType) === normalizeCourtType(courtType);
+};
+
+// Khớp loại sân áp dụng cho Voucher (Phương án A - Scoped Line-Item)
+const isCourtTypeApplicable = (applicableCourtTypes, courtType) => {
+  if (!applicableCourtTypes || !Array.isArray(applicableCourtTypes) || applicableCourtTypes.length === 0) {
+    return true;
+  }
+  if (applicableCourtTypes.includes('ALL')) return true;
+  const normalized = normalizeCourtType(courtType);
+  return applicableCourtTypes.some((type) => normalizeCourtType(type) === normalized);
+};
+
 
 const isPendingBooking = (status) => status === 'PENDING' || status === 'PENDING_APPROVAL';
 const CUSTOMER_CANCELLATION_LIMIT = 3;
@@ -687,11 +713,15 @@ class BookingService {
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const dayType = isWeekend ? 'WEEKEND' : 'WEEKDAY';
 
-    const [timeSlots, prices, priceRules] = await Promise.all([
+    const [timeSlots, prices, allCourtPrices, priceRules] = await Promise.all([
       TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean(),
       Price.find({
         courtId,
         dayType,
+        status: 'ACTIVE'
+      }).lean(),
+      Price.find({
+        courtId,
         status: 'ACTIVE'
       }).lean(),
       PriceRule.find({
@@ -729,7 +759,8 @@ class BookingService {
       ]
     }).select('courtId bookingDate startTime endTime bookingCode status items').lean();
 
-    const courtPricesMin = prices.length > 0 ? Math.min(...prices.map((p) => p.price)) : null;
+    const courtPricesPool = prices.length > 0 ? prices : allCourtPrices;
+    const courtPricesMin = courtPricesPool.length > 0 ? Math.min(...courtPricesPool.map((p) => p.price)) : null;
     const candidateRules = priceRules.filter((r) => matchCourtType(r.courtType, court));
     const dbDefaultPrice = candidateRules.length > 0
       ? Math.min(...candidateRules.map((r) => r.pricePerHour))
@@ -738,6 +769,10 @@ class BookingService {
 
     const slotDetails = timeSlots.map((slot) => {
       const priceDoc = prices.find(
+        (p) =>
+          (p.timeSlotId && p.timeSlotId.toString() === slot._id.toString()) ||
+          p.timeSlot.includes(slot.startTime)
+      ) || allCourtPrices.find(
         (p) =>
           (p.timeSlotId && p.timeSlotId.toString() === slot._id.toString()) ||
           p.timeSlot.includes(slot.startTime)
@@ -809,7 +844,7 @@ class BookingService {
   /**
    * 6. Kiểm tra và áp dụng mã giảm giá (Voucher)
    */
-  async validateVoucher(voucherCode, orderAmount = 0) {
+  async validateVoucher(voucherCode, orderAmount = 0, context = {}) {
     if (!voucherCode) {
       const err = new Error('Vui lòng cung cấp mã voucher!');
       err.statusCode = 400;
@@ -848,10 +883,41 @@ class BookingService {
     }
 
     const currentAmount = Number(orderAmount) || 0;
+    const applicableTypes = voucher.applicableCourtTypes || ['ALL'];
+    let applicableAmount = currentAmount;
+
+    // Phương án A: Kiểm tra loại sân nếu voucher có chỉ định cụ thể
+    if (!applicableTypes.includes('ALL')) {
+      if (Array.isArray(context.courtBreakdowns) && context.courtBreakdowns.length > 0) {
+        const matchingBreakdowns = context.courtBreakdowns.filter((cb) =>
+          isCourtTypeApplicable(applicableTypes, cb.courtType)
+        );
+        if (matchingBreakdowns.length === 0) {
+          const err = new Error(
+            `Mã giảm giá này chỉ áp dụng cho loại sân: ${applicableTypes.join(', ')}!`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+        applicableAmount = matchingBreakdowns.reduce((sum, cb) => sum + cb.totalAmount, 0);
+      } else if (Array.isArray(context.courtTypes) && context.courtTypes.length > 0) {
+        const hasMatching = context.courtTypes.some((ct) =>
+          isCourtTypeApplicable(applicableTypes, ct)
+        );
+        if (!hasMatching) {
+          const err = new Error(
+            `Mã giảm giá này chỉ áp dụng cho loại sân: ${applicableTypes.join(', ')}!`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+    }
+
     const minAmount = voucher.minOrderAmount ?? voucher.minInvoiceAmount ?? 0;
-    if (minAmount > 0 && currentAmount < minAmount) {
+    if (minAmount > 0 && applicableAmount < minAmount) {
       const err = new Error(
-        `Đơn đặt sân phải có giá trị tối thiểu từ ${minAmount.toLocaleString('vi-VN')}đ để sử dụng mã này!`
+        `Đơn đặt sân cho loại sân áp dụng phải có giá trị tối thiểu từ ${minAmount.toLocaleString('vi-VN')}đ để sử dụng mã này!`
       );
       err.statusCode = 400;
       throw err;
@@ -860,12 +926,12 @@ class BookingService {
     let discount = 0;
     const maxDiscount = voucher.maxDiscount ?? voucher.maxDiscountAmount ?? 0;
     if (voucher.discountType === 'PERCENTAGE') {
-      discount = Math.round((currentAmount * voucher.discountValue) / 100);
+      discount = Math.round((applicableAmount * voucher.discountValue) / 100);
       if (maxDiscount > 0 && discount > maxDiscount) {
         discount = maxDiscount;
       }
     } else {
-      discount = Math.min(voucher.discountValue, currentAmount);
+      discount = Math.min(voucher.discountValue, applicableAmount);
     }
 
     const finalAmount = Math.max(0, currentAmount - discount);
@@ -876,6 +942,7 @@ class BookingService {
       voucherName: voucher.voucherName || voucher.name,
       discountType: voucher.discountType,
       discountValue: voucher.discountValue,
+      applicableCourtTypes: voucher.applicableCourtTypes || ['ALL'],
       discount,
       finalAmount
     };
@@ -961,8 +1028,7 @@ class BookingService {
     const [allPrices, allPriceRules, allTimeSlots] = await Promise.all([
       Price.find({
         courtId: { $in: uniqueCourtIds },
-        status: 'ACTIVE',
-        $or: priceDateConditions
+        status: 'ACTIVE'
       }).populate('timeSlotId').lean(),
       PriceRule.find({ status: 'ACTIVE' }).lean(),
       TimeSlot.find({ status: 'ACTIVE' }).sort({ startTime: 1 }).lean()
@@ -992,10 +1058,15 @@ class BookingService {
         (!p.effectiveFrom || new Date(p.effectiveFrom) <= orderEndOfDay) &&
         (!p.effectiveTo || new Date(p.effectiveTo) >= orderStartOfDay)
       );
+      const courtAllActivePrices = allPrices.filter((p) =>
+        p.courtId.toString() === cIdStr &&
+        (!p.effectiveFrom || new Date(p.effectiveFrom) <= orderEndOfDay) &&
+        (!p.effectiveTo || new Date(p.effectiveTo) >= orderStartOfDay)
+      );
 
       // Thu thập các mốc phân chia khung giá (boundaries) từ Price và PriceRule trong database
       const points = new Set([bStart, bEnd]);
-      courtPrices.forEach((p) => {
+      courtAllActivePrices.forEach((p) => {
         if (p.timeSlot && p.timeSlot.includes('-')) {
           const [s, e] = p.timeSlot.split('-').map((t) => t.trim());
           const sMin = parseTimeToMinutes(s);
@@ -1017,7 +1088,9 @@ class BookingService {
       const rawIntervals = [];
 
       // Xác định đơn giá cơ sở động từ bảng giá Price của sân hoặc PriceRule trong database
-      const courtPricesMin = courtPrices.length > 0 ? Math.min(...courtPrices.map((p) => p.price)) : null;
+      const courtPricesMin = courtPrices.length > 0
+        ? Math.min(...courtPrices.map((p) => p.price))
+        : (courtAllActivePrices.length > 0 ? Math.min(...courtAllActivePrices.map((p) => p.price)) : null);
       const candidateRules = allPriceRules.filter((r) => {
         const typeMatches = matchCourtType(r.courtType, court);
         const dayOfWeek = orderDate.getDay();
@@ -1056,7 +1129,17 @@ class BookingService {
               parseTimeToMinutes(r.startTime) <= midPoint &&
               parseTimeToMinutes(r.endTime) >= midPoint;
           });
-          hourlyRate = matchedRule ? matchedRule.pricePerHour : defaultRate;
+          if (matchedRule) {
+            hourlyRate = matchedRule.pricePerHour;
+          } else {
+            // Tìm trong bảng giá của sân từ MongoDB cho khung giờ này (ví dụ bảng giá ngày thường)
+            const fallbackSlotPrice = courtAllActivePrices.find((p) => {
+              if (!p.timeSlot || !p.timeSlot.includes('-')) return false;
+              const [s, e] = p.timeSlot.split('-').map((t) => t.trim());
+              return parseTimeToMinutes(s) <= midPoint && parseTimeToMinutes(e) >= midPoint;
+            });
+            hourlyRate = fallbackSlotPrice ? fallbackSlotPrice.price : defaultRate;
+          }
         }
 
         // Tìm TimeSlot tương ứng trong DB để lấy nhãn mô tả
@@ -1158,26 +1241,34 @@ class BookingService {
           (!voucher.endDate || now <= new Date(voucher.endDate));
         const isExistingVoucher = existingVoucherId && voucher._id.toString() === existingVoucherId.toString();
         const hasLimit = isExistingVoucher || voucher.usageLimit <= 0 || voucher.usedCount < voucher.usageLimit;
+        
+        // Phương án A: Lọc các sân thỏa mãn loại sân áp dụng của voucher
+        const applicableTypes = voucher.applicableCourtTypes || ['ALL'];
+        const applicableBreakdowns = courtBreakdowns.filter((cb) =>
+          isCourtTypeApplicable(applicableTypes, cb.courtType)
+        );
+        const applicableAmount = applicableBreakdowns.reduce((sum, cb) => sum + cb.totalAmount, 0);
         const minAmount = voucher.minOrderAmount ?? voucher.minInvoiceAmount ?? 0;
-        const meetsMinOrder = !minAmount || totalBasePrice >= minAmount;
+        const meetsMinOrder = !minAmount || applicableAmount >= minAmount;
 
-        if (isValidDate && hasLimit && meetsMinOrder) {
+        if (isValidDate && hasLimit && applicableBreakdowns.length > 0 && meetsMinOrder) {
           appliedVoucher = {
             voucherId: voucher._id,
             voucherCode: voucher.voucherCode || voucher.code,
             voucherName: voucher.voucherName || voucher.name,
             discountType: voucher.discountType,
-            discountValue: voucher.discountValue
+            discountValue: voucher.discountValue,
+            applicableCourtTypes: applicableTypes
           };
 
           const maxDiscount = voucher.maxDiscount ?? voucher.maxDiscountAmount ?? 0;
           if (voucher.discountType === 'PERCENTAGE') {
-            discount = Math.round((totalBasePrice * voucher.discountValue) / 100);
+            discount = Math.round((applicableAmount * voucher.discountValue) / 100);
             if (maxDiscount > 0 && discount > maxDiscount) {
               discount = maxDiscount;
             }
           } else {
-            discount = Math.min(voucher.discountValue, totalBasePrice);
+            discount = Math.min(voucher.discountValue, applicableAmount);
           }
         }
       }
@@ -2756,13 +2847,23 @@ class BookingService {
         (originalVoucher.usageLimit <= 0 ||
           originalVoucher.usedCount < originalVoucher.usageLimit ||
           oldVoucherId === originalVoucher._id.toString());
-      if (voucherIsApplicable && originalVoucher.discountType === 'PERCENTAGE') {
-        discount = Math.round((totalBasePrice * originalVoucher.discountValue) / 100);
+
+      // Phương án A: Lọc các sân thỏa mãn loại sân của voucher khi đổi sân
+      const applicableTypes = originalVoucher?.applicableCourtTypes || ['ALL'];
+      const matchingBreakdowns = courtBreakdowns.filter((cb) =>
+        isCourtTypeApplicable(applicableTypes, cb.courtType)
+      );
+      const applicableAmount = matchingBreakdowns.reduce((sum, cb) => sum + cb.totalAmount, 0);
+      const hasValidCourt = applicableTypes.includes('ALL') || matchingBreakdowns.length > 0;
+      const isStillApplicable = voucherIsApplicable && hasValidCourt;
+
+      if (isStillApplicable && originalVoucher.discountType === 'PERCENTAGE') {
+        discount = Math.round((applicableAmount * originalVoucher.discountValue) / 100);
         if (originalVoucher.maxDiscount > 0) {
           discount = Math.min(discount, originalVoucher.maxDiscount);
         }
-      } else if (voucherIsApplicable) {
-        discount = Math.min(originalVoucher.discountValue || 0, totalBasePrice);
+      } else if (isStillApplicable) {
+        discount = Math.min(originalVoucher.discountValue || 0, applicableAmount);
       } else if (!originalBooking.voucherId) {
         discount = Math.min(originalBooking.discount || 0, totalBasePrice);
       }

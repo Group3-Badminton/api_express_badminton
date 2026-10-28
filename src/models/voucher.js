@@ -55,6 +55,10 @@ const voucherSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+    applicableCourtTypes: {
+      type: [String],
+      default: ['ALL']
+    },
     status: {
       type: String,
       enum: ['ACTIVE', 'INACTIVE'],

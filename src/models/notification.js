@@ -30,7 +30,7 @@ const notificationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['ACTIVE', 'ARCHIVED'],
+    enum: ['ACTIVE', 'INACTIVE', 'ARCHIVED'],
     default: 'ACTIVE'
   },
   createdAt: {
@@ -38,5 +38,8 @@ const notificationSchema = new mongoose.Schema({
     default: Date.now
   }
 });
+
+notificationSchema.index({ recipientId: 1, status: 1, createdAt: -1 });
+notificationSchema.index({ recipientType: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Notification', notificationSchema, 'Notification');

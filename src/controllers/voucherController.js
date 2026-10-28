@@ -34,7 +34,7 @@ class VoucherController {
    */
   async createVoucher(req, res) {
     try {
-      const adminUserId = req.user.userId;
+      const adminUserId = req.user?._id || req.user?.id || req.user?.userId;
       const voucher = await voucherService.createVoucher(req.body, adminUserId);
       return sendSuccess(res, voucher, 'Tạo mã voucher thành công!', 201);
     } catch (error) {

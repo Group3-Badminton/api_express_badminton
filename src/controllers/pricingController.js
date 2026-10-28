@@ -11,6 +11,85 @@ const timeToMinutes = (timeStr) => {
   return hours * 60 + minutes;
 };
 
+// Định dạng thứ trong tuần hiển thị cho thông báo lỗi
+const formatDaysOfWeek = (days = []) => {
+  const map = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 0: 'CN' };
+  const sorted = days.slice().sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b));
+  return sorted.map((d) => map[d] || d).join(', ');
+};
+
+// Định dạng loại sân hiển thị cho thông báo lỗi
+const formatCourtType = (type) => {
+  const map = {
+    ALL: 'Tất cả loại sân',
+    STANDARD: 'Sân Tiêu Chuẩn',
+    VIP: 'Sân VIP',
+    PREMIUM: 'Sân Thi Đấu'
+  };
+  return map[type] || type;
+};
+
+/**
+ * Kiểm tra xem 2 quy tắc giá có bị trùng lặp / xung đột hay không:
+ * 1. Cùng loại sân (hoặc 1 trong 2 áp dụng ALL)
+ * 2. Có ít nhất 1 ngày trong tuần trùng nhau
+ * 3. Khung giờ giao thoa nhau (startA < endB && endA > startB)
+ */
+const checkPriceRuleOverlap = (ruleA, ruleB) => {
+  // 1. Kiểm tra Loại sân
+  const courtOverlap =
+    ruleA.courtType === 'ALL' ||
+    ruleB.courtType === 'ALL' ||
+    ruleA.courtType === ruleB.courtType;
+
+  if (!courtOverlap) return false;
+
+  // 2. Kiểm tra Ngày trong tuần
+  const daysA = ruleA.daysOfWeek || [];
+  const daysB = ruleB.daysOfWeek || [];
+  const daysOverlap = daysA.some((day) => daysB.includes(day));
+
+  if (!daysOverlap) return false;
+
+  // 3. Kiểm tra Khung giờ giao thoa
+  const startA = timeToMinutes(ruleA.startTime);
+  const endA = timeToMinutes(ruleA.endTime);
+  const startB = timeToMinutes(ruleB.startTime);
+  const endB = timeToMinutes(ruleB.endTime);
+
+  const timeOverlap = startA < endB && endA > startB;
+
+  return timeOverlap;
+};
+
+/**
+ * Tìm quy tắc giá đang ACTIVE bị xung đột
+ */
+const findConflictingRule = async ({ courtType, daysOfWeek, startTime, endTime, excludeId = null }) => {
+  const query = { status: 'ACTIVE' };
+  if (excludeId) {
+    query._id = { $ne: excludeId };
+  }
+
+  const activeRules = await PriceRule.find(query).lean();
+
+  const newRuleData = {
+    courtType,
+    daysOfWeek: Array.from(new Set(daysOfWeek)).map(Number),
+    startTime,
+    endTime
+  };
+
+  for (const existingRule of activeRules) {
+    if (checkPriceRuleOverlap(newRuleData, existingRule)) {
+      return existingRule;
+    }
+  }
+
+  return null;
+};
+
+
 // Chuẩn hóa loại sân về 3 phân khúc chuẩn: STANDARD, VIP, PREMIUM
 const normalizeCourtType = (type) => {
   if (!type) return 'STANDARD';
@@ -220,6 +299,22 @@ exports.createPriceRule = async (req, res) => {
       return sendError(res, 'Giá thuê không được nhỏ hơn 0 VNĐ!', 400);
     }
 
+        // Kiểm tra trùng lặp với các quy tắc giá đang áp dụng (ACTIVE)
+    const conflictingRule = await findConflictingRule({
+      courtType,
+      daysOfWeek,
+      startTime: startTime.trim(),
+      endTime: endTime.trim()
+    });
+
+    if (conflictingRule) {
+      return sendError(
+        res,
+        `Bảng giá này bị trùng ngày, giờ và loại sân với quy tắc đang áp dụng: "${conflictingRule.name}" (Loại sân: ${formatCourtType(conflictingRule.courtType)}, Ngày: ${formatDaysOfWeek(conflictingRule.daysOfWeek)}, Giờ: ${conflictingRule.startTime} - ${conflictingRule.endTime}). Vui lòng điều chỉnh lại!`,
+        400
+      );
+    }
+
     // 2. Tạo bản ghi mới
     const newPriceRule = await PriceRule.create({
       name: name.trim(),
@@ -293,6 +388,23 @@ exports.updatePriceRule = async (req, res) => {
       return sendError(res, 'Giá thuê không được nhỏ hơn 0 VNĐ!', 400);
     }
 
+        // Kiểm tra trùng lặp với các quy tắc giá đang áp dụng (ACTIVE), ngoại trừ chính quy tắc này
+    const conflictingRule = await findConflictingRule({
+      courtType,
+      daysOfWeek,
+      startTime: startTime.trim(),
+      endTime: endTime.trim(),
+      excludeId: existingRule._id
+    });
+
+    if (conflictingRule) {
+      return sendError(
+        res,
+        `Bảng giá cập nhật bị trùng ngày, giờ và loại sân với quy tắc đang áp dụng: "${conflictingRule.name}" (Loại sân: ${formatCourtType(conflictingRule.courtType)}, Ngày: ${formatDaysOfWeek(conflictingRule.daysOfWeek)}, Giờ: ${conflictingRule.startTime} - ${conflictingRule.endTime}). Vui lòng điều chỉnh lại!`,
+        400
+      );
+    }
+
     // 2. Cập nhật dữ liệu
     existingRule.name = name.trim();
     existingRule.courtType = courtType;
@@ -337,6 +449,23 @@ exports.activatePriceRule = async (req, res) => {
     const rule = await PriceRule.findById(id);
     if (!rule) {
       return sendError(res, 'Không tìm thấy quy tắc giá cần kích hoạt!', 404);
+    }
+
+        // Kiểm tra xem quy tắc muốn kích hoạt lại có bị trùng với quy tắc nào đang ACTIVE không
+    const conflictingRule = await findConflictingRule({
+      courtType: rule.courtType,
+      daysOfWeek: rule.daysOfWeek,
+      startTime: rule.startTime,
+      endTime: rule.endTime,
+      excludeId: rule._id
+    });
+
+    if (conflictingRule) {
+      return sendError(
+        res,
+        `Không thể kích hoạt lại quy tắc "${rule.name}" vì bị trùng ngày, giờ và loại sân với quy tắc đang áp dụng: "${conflictingRule.name}" (Loại sân: ${formatCourtType(conflictingRule.courtType)}, Ngày: ${formatDaysOfWeek(conflictingRule.daysOfWeek)}, Giờ: ${conflictingRule.startTime} - ${conflictingRule.endTime}). Vui lòng điều chỉnh hoặc vô hiệu hóa quy tắc kia trước!`,
+        400
+      );
     }
 
     rule.status = 'ACTIVE';
