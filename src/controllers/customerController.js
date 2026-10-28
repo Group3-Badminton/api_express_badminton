@@ -14,6 +14,9 @@ const sanitizeCustomer = (customer) => ({
   status: customer.status,
   address: customer.address || '',
   isOnlineAccount: !!customer.password,
+  lockReason: customer.lockReason || '',
+  bookingCancellationHistory: customer.bookingCancellationHistory || [],
+  accountLockHistory: customer.accountLockHistory || [],
   createdAt: customer.createdAt,
   updatedAt: customer.updatedAt
 });
@@ -50,7 +53,7 @@ exports.getCustomers = async (req, res) => {
     }
 
     const customers = await User.find(query)
-      .select('_id fullName email phone role status address password createdAt updatedAt')
+      .select('_id fullName email phone role status address password lockReason bookingCancellationHistory accountLockHistory createdAt updatedAt')
       .sort({ createdAt: -1 });
 
     return sendSuccess(res, customers.map(sanitizeCustomer), 'Lấy danh sách khách hàng thành công!', 200);
@@ -97,7 +100,7 @@ exports.createCustomer = async (req, res) => {
 
     // E1: Kiểm tra trường bắt buộc
     if (!cleanFullName || !cleanPhone) {
-      return sendError(res, 'Họ và tên cùng Số điện thoại không được để trống!', 400);
+      return sendError(res, 'Họ và tên cùng Số điện thoại là bắt buộc.', 400);
     }
 
     // E2: Kiểm tra định dạng số điện thoại VN (10 chữ số)
@@ -135,12 +138,12 @@ exports.createCustomer = async (req, res) => {
       status: 'ACTIVE'
     });
 
-    return sendSuccess(res, sanitizeCustomer(newCustomer), 'Tạo hồ sơ khách hàng thành công!', 201);
+    return sendSuccess(res, sanitizeCustomer(newCustomer), 'Khách hàng đã được tạo thành công.', 201);
   } catch (error) {
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email đã tồn tại!', 409);
     }
-    return sendError(res, 'Không thể tạo hồ sơ khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể tạo khách hàng vào lúc này. Vui lòng thử lại sau.', 500);
   }
 };
 
@@ -167,7 +170,7 @@ exports.updateCustomer = async (req, res) => {
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
 
     if (!cleanFullName || !cleanPhone) {
-      return sendError(res, 'Họ và tên cùng Số điện thoại không được để trống!', 400);
+      return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
     }
 
     if (!PHONE_REGEX.test(cleanPhone)) {
@@ -209,12 +212,12 @@ exports.updateCustomer = async (req, res) => {
 
     await customer.save();
 
-    return sendSuccess(res, sanitizeCustomer(customer), 'Cập nhật thông tin khách hàng thành công!', 200);
+    return sendSuccess(res, sanitizeCustomer(customer), 'Thông tin khách hàng đã được cập nhật thành công.', 200);
   } catch (error) {
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email bị trùng lặp!', 409);
     }
-    return sendError(res, 'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau.', 500);
   }
 };
 
@@ -236,15 +239,15 @@ exports.deactivateCustomer = async (req, res) => {
     }
 
     if (customer.status === 'INACTIVE') {
-      return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng này đã ở trạng thái vô hiệu hóa từ trước.', 200);
+      return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng này hiện đã bị vô hiệu hóa từ trước.', 200);
     }
 
     customer.status = 'INACTIVE';
     await customer.save();
 
-    return sendSuccess(res, sanitizeCustomer(customer), 'Vô hiệu hóa khách hàng thành công! Lịch sử giao dịch được bảo toàn.', 200);
+    return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng đã được vô hiệu hóa thành công.', 200);
   } catch (error) {
-    return sendError(res, 'Không thể vô hiệu hóa khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể vô hiệu hóa khách hàng vào lúc này. Vui lòng thử lại sau.', 500);
   }
 };
 

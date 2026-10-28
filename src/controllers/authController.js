@@ -38,7 +38,7 @@ exports.login = async (req, res) => {
     if (user.status !== 'ACTIVE') {
       return sendError(
         res,
-        user.lockReason || 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên!',
+        user.lockReason || 'Tài khoản của bạn đang bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.',
         403
       );
     }
@@ -88,7 +88,7 @@ exports.register = async (req, res) => {
     const existingPhone = await User.findOne({ phone: cleanPhone, email: { $ne: cleanEmail } });
     if (existingPhone) {
       if (existingPhone.role !== 'CUSTOMER' || existingPhone.status !== 'PENDING_VERIFICATION') {
-        return sendError(res, 'Số điện thoại này đã được sử dụng. Vui lòng chọn số khác!', 400);
+        return sendError(res, 'Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng số khác.', 400);
       }
     }
     // 3. Sinh mã OTP và mã hóa mật khẩu
@@ -138,10 +138,10 @@ exports.sendOtp = async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: cleanEmail });
     if (!user) {
-      return sendError(res, "Email không tồn 400", 400);
+      return sendError(res, 'Không tìm thấy tài khoản nào liên kết với email này.', 404);
     }
     if (user.status !== 'ACTIVE') {
-      return sendError(res, 'Tài khoản của bạn đang bị khóa. Vui lòng liên hệ quản trị viên!', 403);
+      return sendError(res, 'Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.', 403);
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString()
