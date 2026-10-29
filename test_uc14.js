@@ -15,7 +15,8 @@ const jwt = require('jsonwebtoken');
 const app = require('./app');
 const Product = require('./src/models/product');
 const StockInHistory = require('./src/models/stockInHistory');
-const User = require('./src/models/user');
+const Staff = require('./src/models/staff');
+const Customer = require('./src/models/customer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'badminton_secret_key_2026';
 
@@ -90,14 +91,32 @@ async function runTests() {
     });
   });
 
-  // Tạo mock users và JWT tokens
-  const adminId = new mongoose.Types.ObjectId();
-  const staffId = new mongoose.Types.ObjectId();
-  const customerId = new mongoose.Types.ObjectId();
+  // Tạo mock users trong DB và sinh JWT tokens
+  const admin = await Staff.create({
+    fullName: 'Admin Test UC14',
+    email: `admin_${Date.now()}@uc14.com`,
+    password: 'dummy',
+    role: 'ADMIN',
+    status: 'ACTIVE'
+  });
+  const staff = await Staff.create({
+    fullName: 'Staff Test UC14',
+    email: `staff_${Date.now()}@uc14.com`,
+    password: 'dummy',
+    role: 'STAFF',
+    status: 'ACTIVE'
+  });
+  const customer = await Customer.create({
+    fullName: 'Customer Test UC14',
+    email: `cust_${Date.now()}@uc14.com`,
+    password: 'dummy',
+    role: 'CUSTOMER',
+    status: 'ACTIVE'
+  });
 
-  const adminToken = jwt.sign({ userId: adminId, role: 'ADMIN', email: 'admin@test.com' }, JWT_SECRET, { expiresIn: '1h' });
-  const staffToken = jwt.sign({ userId: staffId, role: 'STAFF', email: 'staff@test.com' }, JWT_SECRET, { expiresIn: '1h' });
-  const customerToken = jwt.sign({ userId: customerId, role: 'CUSTOMER', email: 'cust@test.com' }, JWT_SECRET, { expiresIn: '1h' });
+  const adminToken = jwt.sign({ userId: admin._id, role: 'ADMIN', userType: 'STAFF', email: admin.email }, JWT_SECRET, { expiresIn: '1h' });
+  const staffToken = jwt.sign({ userId: staff._id, role: 'STAFF', userType: 'STAFF', email: staff.email }, JWT_SECRET, { expiresIn: '1h' });
+  const customerToken = jwt.sign({ userId: customer._id, role: 'CUSTOMER', userType: 'CUSTOMER', email: customer.email }, JWT_SECRET, { expiresIn: '1h' });
 
   // Dọn dẹp collection trước khi test
   await Product.deleteMany({});
@@ -201,7 +220,7 @@ async function runTests() {
     assert(historyRecord !== null, 'Tạo bản ghi StockInHistory thành công');
     assert(historyRecord.quantity === 100 && historyRecord.stockBefore === 0 && historyRecord.stockAfter === 100,
       'Bản ghi lưu đúng: quantity=100, stockBefore=0, stockAfter=100');
-    assert(String(historyRecord.performedBy) === String(adminId), 'Truy vết chính xác Admin thực hiện');
+    assert(String(historyRecord.performedBy) === String(admin._id), 'Truy vết chính xác Admin thực hiện');
 
     // 3.5 Chống gửi trùng request (Idempotency)
     const dupStockInRes = await request('POST', `/api/products/${p1Id}/stock-ins`, {

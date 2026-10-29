@@ -5,7 +5,8 @@ dotenv.config();
 const PlayingSession = require('./src/models/playingSession');
 const Court = require('./src/models/court');
 const Booking = require('./src/models/booking');
-const User = require('./src/models/user');
+const Customer = require('./src/models/customer');
+const Staff = require('./src/models/staff');
 const Invoice = require('./src/models/invoice');
 const {
   scheduleSessionNearEndWarning,
@@ -44,9 +45,9 @@ async function runTests() {
       });
     }
 
-    let customer = await User.findOne({ role: 'CUSTOMER' });
+    let customer = await Customer.findOne({ role: 'CUSTOMER' });
     if (!customer) {
-      customer = await User.create({
+      customer = await Customer.create({
         fullName: 'Nguyễn Văn Test',
         email: 'test_customer_uc12@gmail.com',
         phone: '0988776655',
@@ -55,9 +56,9 @@ async function runTests() {
       });
     }
 
-    let staff = await User.findOne({ role: 'STAFF' });
+    let staff = await Staff.findOne({ role: 'STAFF' });
     if (!staff) {
-      staff = await User.create({
+      staff = await Staff.create({
         fullName: 'Nhân viên Test',
         email: 'staff_test_uc12@gmail.com',
         phone: '0911223344',

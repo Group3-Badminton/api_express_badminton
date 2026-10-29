@@ -16,7 +16,8 @@ const app = require('./app');
 
 const Booking = require('./src/models/booking');
 const Court = require('./src/models/court');
-const User = require('./src/models/user');
+const Customer = require('./src/models/customer');
+const Staff = require('./src/models/staff');
 const TimeSlot = require('./src/models/timeSlot');
 const Price = require('./src/models/price');
 const Voucher = require('./src/models/voucher');
@@ -85,7 +86,7 @@ const runSuite = async () => {
     // -------------------------------------------------------------------------
     // SETUP FIXTURES
     // -------------------------------------------------------------------------
-    const adminUser = await User.create({
+    const adminUser = await Staff.create({
       fullName: 'Admin Test',
       email: `admin_${Date.now()}@test.com`,
       phone: `090${Date.now().toString().slice(-7)}`,
@@ -93,7 +94,7 @@ const runSuite = async () => {
       role: 'ADMIN',
       status: 'ACTIVE'
     });
-    const staffUser = await User.create({
+    const staffUser = await Staff.create({
       fullName: 'Staff Test',
       email: `staff_${Date.now()}@test.com`,
       phone: `091${Date.now().toString().slice(-7)}`,
@@ -101,7 +102,7 @@ const runSuite = async () => {
       role: 'STAFF',
       status: 'ACTIVE'
     });
-    const customerUserA = await User.create({
+    const customerUserA = await Customer.create({
       fullName: 'Customer Test A',
       email: `customera_${Date.now()}@test.com`,
       phone: `092${Date.now().toString().slice(-7)}`,
@@ -110,7 +111,7 @@ const runSuite = async () => {
       status: 'ACTIVE',
       bookingCancellationHistory: []
     });
-    const customerUserB = await User.create({
+    const customerUserB = await Customer.create({
       fullName: 'Customer Test B',
       email: `customerb_${Date.now()}@test.com`,
       phone: `093${Date.now().toString().slice(-7)}`,
@@ -818,7 +819,7 @@ const runSuite = async () => {
     // =========================================================================
     console.log('\n--- GROUP 11: Quy Tắc BR-49 ---');
 
-    const br49User = await User.create({
+    const br49User = await Customer.create({
       fullName: 'Khách BR49 Test',
       email: `br49_${Date.now()}@test.com`,
       phone: `097${Date.now().toString().slice(-7)}`,
@@ -857,7 +858,7 @@ const runSuite = async () => {
     const cancel1Id = await createAndConfirmBooking('07:00', '08:00');
     {
       const res = await request('PATCH', `/api/bookings/${cancel1Id}/status`, { status: 'CANCELLED' }, br49Token);
-      const user = await User.findById(br49User._id);
+      const user = await Customer.findById(br49User._id);
       const ok = res.status === 200 && user.status === 'ACTIVE' && res.body.data.cancellationResult.cancellationCount === 1;
       logTest('TC-BR49-01', 'Hủy đơn đã CONFIRMED lần 1 -> tài khoản ACTIVE, count = 1', ok);
     }
@@ -866,7 +867,7 @@ const runSuite = async () => {
     const cancel2Id = await createAndConfirmBooking('08:00', '09:00');
     {
       const res = await request('PATCH', `/api/bookings/${cancel2Id}/status`, { status: 'CANCELLED' }, br49Token);
-      const user = await User.findById(br49User._id);
+      const user = await Customer.findById(br49User._id);
       const ok = res.status === 200 && user.status === 'ACTIVE' && res.body.data.cancellationResult.cancellationCount === 2;
       logTest('TC-BR49-02', 'Hủy đơn đã CONFIRMED lần 2 -> tài khoản ACTIVE, count = 2', ok);
     }
@@ -875,7 +876,7 @@ const runSuite = async () => {
     const cancel3Id = await createAndConfirmBooking('09:00', '10:00');
     {
       const res = await request('PATCH', `/api/bookings/${cancel3Id}/status`, { status: 'CANCELLED' }, br49Token);
-      const user = await User.findById(br49User._id);
+      const user = await Customer.findById(br49User._id);
       const ok = res.status === 200 &&
         user.status === 'LOCKED' &&
         user.lockReason.includes('giới hạn 3 lần') &&

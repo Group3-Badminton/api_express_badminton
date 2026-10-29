@@ -71,7 +71,7 @@ const playingSessionSchema = new mongoose.Schema({
   },
   staffId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Staff',
     default: null
   },
   // Thời gian

@@ -66,7 +66,7 @@ async function runTests() {
 
   const staffLogin = await request('/auth/login', {
     method: 'POST',
-    body: { account: 'abc@gmail.com', password: '123456' }
+    body: { account: 'staff@gmail.com', password: '123456' }
   });
   assert(staffLogin.status === 200 && staffLogin.data.data?.token, 'Staff đăng nhập thành công và có JWT token');
   const staffToken = staffLogin.data?.data?.token;

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
-const User = require('../models/user');
+const Customer = require('../models/customer');
+const Staff = require('../models/staff');
 const { sendSuccess, sendError } = require('../utils/response');
 
 const PHONE_REGEX = /(0[3|5|7|8|9])+([0-9]{8})\b/;
@@ -10,7 +11,7 @@ const sanitizeCustomer = (customer) => ({
   fullName: customer.fullName,
   email: customer.email || '',
   phone: customer.phone,
-  role: customer.role,
+  role: customer.role || 'CUSTOMER',
   status: customer.status,
   address: customer.address || '',
   isOnlineAccount: !!customer.password,
@@ -33,7 +34,7 @@ const escapeRegex = (string) => {
 exports.getCustomers = async (req, res) => {
   try {
     const { search, status } = req.query;
-    const query = { role: 'CUSTOMER' };
+    const query = {};
 
     // 1. Lọc theo trạng thái
     if (status !== undefined && status !== '') {
@@ -52,7 +53,7 @@ exports.getCustomers = async (req, res) => {
       ];
     }
 
-    const customers = await User.find(query)
+    const customers = await Customer.find(query)
       .select('_id fullName email phone role status address password lockReason bookingCancellationHistory accountLockHistory createdAt updatedAt')
       .sort({ createdAt: -1 });
 
@@ -72,7 +73,7 @@ exports.getCustomerById = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' })
+    const customer = await Customer.findById(id)
       .select('_id fullName email phone role status address password createdAt updatedAt');
 
     if (!customer) {
@@ -109,8 +110,9 @@ exports.createCustomer = async (req, res) => {
     }
 
     // E3: Kiểm tra Số điện thoại đã được đăng ký chưa (BR-04)
-    const existingPhone = await User.findOne({ phone: cleanPhone });
-    if (existingPhone) {
+    const existingPhoneInCust = await Customer.findOne({ phone: cleanPhone });
+    const existingPhoneInStaff = await Staff.findOne({ phone: cleanPhone });
+    if (existingPhoneInCust || existingPhoneInStaff) {
       return sendError(res, 'Số điện thoại này đã được đăng ký trong hệ thống!', 409);
     }
 
@@ -121,19 +123,20 @@ exports.createCustomer = async (req, res) => {
       if (!EMAIL_REGEX.test(cleanEmail)) {
         return sendError(res, 'Định dạng Email không hợp lệ!', 400);
       }
-      const existingEmail = await User.findOne({ email: cleanEmail });
-      if (existingEmail) {
+      const existingEmailInCust = await Customer.findOne({ email: cleanEmail });
+      const existingEmailInStaff = await Staff.findOne({ email: cleanEmail });
+      if (existingEmailInCust || existingEmailInStaff) {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
       }
     }
 
-    // Tạo bản ghi khách hàng (POST-1, POST-2, POST-3: không tạo password)
-    const newCustomer = await User.create({
+    // Tạo bản ghi khách hàng
+    const newCustomer = await Customer.create({
       fullName: cleanFullName,
       phone: cleanPhone,
       email: cleanEmail,
       address: typeof address === 'string' ? address.trim() : '',
-      password: null, // Không tạo mật khẩu đăng nhập cho khách tại quầy
+      password: 'WALK_IN_NO_PASSWORD',
       role: 'CUSTOMER',
       status: 'ACTIVE'
     });
@@ -159,7 +162,7 @@ exports.updateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng cần cập nhật!', 404);
     }
@@ -179,8 +182,9 @@ exports.updateCustomer = async (req, res) => {
 
     // Kiểm tra trùng SĐT nếu có thay đổi
     if (cleanPhone !== customer.phone) {
-      const existingPhone = await User.findOne({ phone: cleanPhone, _id: { $ne: id } });
-      if (existingPhone) {
+      const existingPhoneCust = await Customer.findOne({ phone: cleanPhone, _id: { $ne: id } });
+      const existingPhoneStaff = await Staff.findOne({ phone: cleanPhone });
+      if (existingPhoneCust || existingPhoneStaff) {
         return sendError(res, 'Số điện thoại này đã được sử dụng bởi khách hàng khác!', 409);
       }
     }
@@ -193,8 +197,9 @@ exports.updateCustomer = async (req, res) => {
         if (!EMAIL_REGEX.test(emailInput)) {
           return sendError(res, 'Định dạng Email không hợp lệ!', 400);
         }
-        const existingEmail = await User.findOne({ email: emailInput, _id: { $ne: id } });
-        if (existingEmail) {
+        const existingEmailCust = await Customer.findOne({ email: emailInput, _id: { $ne: id } });
+        const existingEmailStaff = await Staff.findOne({ email: emailInput });
+        if (existingEmailCust || existingEmailStaff) {
           return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
         }
         cleanEmail = emailInput;
@@ -233,7 +238,7 @@ exports.deactivateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng!', 404);
     }
@@ -261,7 +266,7 @@ exports.activateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng!', 404);
     }

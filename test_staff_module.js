@@ -390,13 +390,14 @@ async function runTests() {
 
   // 8.5. Kết hợp Từ khóa VÀ Trạng thái
   // Tìm "Nhân Viên" (tên của staff 1 vốn là INACTIVE) nhưng lọc status=ACTIVE -> Phải rỗng
-  const searchAndFilterNoMatch = await request('/staffs?search=' + encodeURIComponent('Nhân Viên') + '&status=ACTIVE', {
+  // Tìm "Đã Đổi Tên" (tên của staff 1 vốn là INACTIVE) nhưng lọc status=ACTIVE -> Phải rỗng
+  const searchAndFilterNoMatch = await request('/staffs?search=' + encodeURIComponent('Đã Đổi Tên') + '&status=ACTIVE', {
     headers: { Authorization: `Bearer ${adminToken}` }
   });
   assert(searchAndFilterNoMatch.status === 200 && searchAndFilterNoMatch.data.data.length === 0, 'Kết hợp từ khóa + trạng thái không khớp trả mảng rỗng 200');
 
-  // Tìm "Nhân Viên" VÀ status=INACTIVE -> Phải thấy staff 1
-  const searchAndFilterMatch = await request('/staffs?search=' + encodeURIComponent('Nhân Viên') + '&status=INACTIVE', {
+  // Tìm "Đã Đổi Tên" VÀ status=INACTIVE -> Phải thấy staff 1
+  const searchAndFilterMatch = await request('/staffs?search=' + encodeURIComponent('Đã Đổi Tên') + '&status=INACTIVE', {
     headers: { Authorization: `Bearer ${adminToken}` }
   });
   assert(searchAndFilterMatch.status === 200 && searchAndFilterMatch.data.data.some(s => s._id === staff1._id), 'Kết hợp từ khóa + trạng thái khớp trả đúng bản ghi');
@@ -458,8 +459,8 @@ async function runTests() {
   console.log('\n--- 9. Dọn dẹp dữ liệu kiểm thử ---');
   try {
     const conn = await mongoose.connect(process.env.MONGODB_URI);
-    const User = require('./src/models/user');
-    const deleteResult = await User.deleteMany({ email: { $regex: /^test\.staff\./ } });
+    const Staff = require('./src/models/staff');
+    const deleteResult = await Staff.deleteMany({ email: { $regex: /^test\.staff\./ } });
     console.log(`     (Đã xóa ${deleteResult.deletedCount} tài khoản kiểm thử test.staff.*)`);
     await mongoose.disconnect();
     assert(true, 'Dọn dẹp tài khoản kiểm thử thành công, giữ nguyên các tài khoản chính');

@@ -3,7 +3,8 @@ require('dotenv').config();
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const Booking = require('./src/models/booking');
-const User = require('./src/models/user');
+const Customer = require('./src/models/customer');
+const Staff = require('./src/models/staff');
 const bookingService = require('./src/services/bookingService');
 
 const makeTestUri = (uri, databaseName) => {
@@ -186,7 +187,7 @@ const main = async () => {
     assert.equal(wholeBookingResult.price, 0);
     assert(wholeBookingResult.items.every((item) => item.status === 'CANCELLED'));
 
-    const customer = await User.create({
+    const customer = await Customer.create({
       password: 'test-only-password-hash',
       fullName: 'Booking cancellation test customer',
       role: 'CUSTOMER',
