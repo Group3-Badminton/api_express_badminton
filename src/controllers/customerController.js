@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
-const User = require('../models/user');
+const Customer = require('../models/customer');
+const Staff = require('../models/staff');
 const { sendSuccess, sendError } = require('../utils/response');
 
 const PHONE_REGEX = /(0[3|5|7|8|9])+([0-9]{8})\b/;
@@ -10,10 +11,13 @@ const sanitizeCustomer = (customer) => ({
   fullName: customer.fullName,
   email: customer.email || '',
   phone: customer.phone,
-  role: customer.role,
+  role: customer.role || 'CUSTOMER',
   status: customer.status,
   address: customer.address || '',
   isOnlineAccount: !!customer.password,
+  lockReason: customer.lockReason || '',
+  bookingCancellationHistory: customer.bookingCancellationHistory || [],
+  accountLockHistory: customer.accountLockHistory || [],
   createdAt: customer.createdAt,
   updatedAt: customer.updatedAt
 });
@@ -30,7 +34,7 @@ const escapeRegex = (string) => {
 exports.getCustomers = async (req, res) => {
   try {
     const { search, status } = req.query;
-    const query = { role: 'CUSTOMER' };
+    const query = {};
 
     // 1. Lọc theo trạng thái
     if (status !== undefined && status !== '') {
@@ -49,8 +53,8 @@ exports.getCustomers = async (req, res) => {
       ];
     }
 
-    const customers = await User.find(query)
-      .select('_id fullName email phone role status address password createdAt updatedAt')
+    const customers = await Customer.find(query)
+      .select('_id fullName email phone role status address password lockReason bookingCancellationHistory accountLockHistory createdAt updatedAt')
       .sort({ createdAt: -1 });
 
     return sendSuccess(res, customers.map(sanitizeCustomer), 'Lấy danh sách khách hàng thành công!', 200);
@@ -69,7 +73,7 @@ exports.getCustomerById = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' })
+    const customer = await Customer.findById(id)
       .select('_id fullName email phone role status address password createdAt updatedAt');
 
     if (!customer) {
@@ -97,7 +101,7 @@ exports.createCustomer = async (req, res) => {
 
     // E1: Kiểm tra trường bắt buộc
     if (!cleanFullName || !cleanPhone) {
-      return sendError(res, 'Họ và tên cùng Số điện thoại không được để trống!', 400);
+      return sendError(res, 'Họ và tên cùng Số điện thoại là bắt buộc.', 400);
     }
 
     // E2: Kiểm tra định dạng số điện thoại VN (10 chữ số)
@@ -106,8 +110,9 @@ exports.createCustomer = async (req, res) => {
     }
 
     // E3: Kiểm tra Số điện thoại đã được đăng ký chưa (BR-04)
-    const existingPhone = await User.findOne({ phone: cleanPhone });
-    if (existingPhone) {
+    const existingPhoneInCust = await Customer.findOne({ phone: cleanPhone });
+    const existingPhoneInStaff = await Staff.findOne({ phone: cleanPhone });
+    if (existingPhoneInCust || existingPhoneInStaff) {
       return sendError(res, 'Số điện thoại này đã được đăng ký trong hệ thống!', 409);
     }
 
@@ -118,29 +123,30 @@ exports.createCustomer = async (req, res) => {
       if (!EMAIL_REGEX.test(cleanEmail)) {
         return sendError(res, 'Định dạng Email không hợp lệ!', 400);
       }
-      const existingEmail = await User.findOne({ email: cleanEmail });
-      if (existingEmail) {
+      const existingEmailInCust = await Customer.findOne({ email: cleanEmail });
+      const existingEmailInStaff = await Staff.findOne({ email: cleanEmail });
+      if (existingEmailInCust || existingEmailInStaff) {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
       }
     }
 
-    // Tạo bản ghi khách hàng (POST-1, POST-2, POST-3: không tạo password)
-    const newCustomer = await User.create({
+    // Tạo bản ghi khách hàng
+    const newCustomer = await Customer.create({
       fullName: cleanFullName,
       phone: cleanPhone,
       email: cleanEmail,
       address: typeof address === 'string' ? address.trim() : '',
-      password: null, // Không tạo mật khẩu đăng nhập cho khách tại quầy
+      password: 'WALK_IN_NO_PASSWORD',
       role: 'CUSTOMER',
       status: 'ACTIVE'
     });
 
-    return sendSuccess(res, sanitizeCustomer(newCustomer), 'Tạo hồ sơ khách hàng thành công!', 201);
+    return sendSuccess(res, sanitizeCustomer(newCustomer), 'Khách hàng đã được tạo thành công.', 201);
   } catch (error) {
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email đã tồn tại!', 409);
     }
-    return sendError(res, 'Không thể tạo hồ sơ khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể tạo khách hàng vào lúc này. Vui lòng thử lại sau.', 500);
   }
 };
 
@@ -156,7 +162,7 @@ exports.updateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng cần cập nhật!', 404);
     }
@@ -167,7 +173,7 @@ exports.updateCustomer = async (req, res) => {
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
 
     if (!cleanFullName || !cleanPhone) {
-      return sendError(res, 'Họ và tên cùng Số điện thoại không được để trống!', 400);
+      return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
     }
 
     if (!PHONE_REGEX.test(cleanPhone)) {
@@ -176,8 +182,9 @@ exports.updateCustomer = async (req, res) => {
 
     // Kiểm tra trùng SĐT nếu có thay đổi
     if (cleanPhone !== customer.phone) {
-      const existingPhone = await User.findOne({ phone: cleanPhone, _id: { $ne: id } });
-      if (existingPhone) {
+      const existingPhoneCust = await Customer.findOne({ phone: cleanPhone, _id: { $ne: id } });
+      const existingPhoneStaff = await Staff.findOne({ phone: cleanPhone });
+      if (existingPhoneCust || existingPhoneStaff) {
         return sendError(res, 'Số điện thoại này đã được sử dụng bởi khách hàng khác!', 409);
       }
     }
@@ -190,8 +197,9 @@ exports.updateCustomer = async (req, res) => {
         if (!EMAIL_REGEX.test(emailInput)) {
           return sendError(res, 'Định dạng Email không hợp lệ!', 400);
         }
-        const existingEmail = await User.findOne({ email: emailInput, _id: { $ne: id } });
-        if (existingEmail) {
+        const existingEmailCust = await Customer.findOne({ email: emailInput, _id: { $ne: id } });
+        const existingEmailStaff = await Staff.findOne({ email: emailInput });
+        if (existingEmailCust || existingEmailStaff) {
           return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
         }
         cleanEmail = emailInput;
@@ -209,12 +217,12 @@ exports.updateCustomer = async (req, res) => {
 
     await customer.save();
 
-    return sendSuccess(res, sanitizeCustomer(customer), 'Cập nhật thông tin khách hàng thành công!', 200);
+    return sendSuccess(res, sanitizeCustomer(customer), 'Thông tin khách hàng đã được cập nhật thành công.', 200);
   } catch (error) {
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email bị trùng lặp!', 409);
     }
-    return sendError(res, 'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau.', 500);
   }
 };
 
@@ -230,21 +238,21 @@ exports.deactivateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng!', 404);
     }
 
     if (customer.status === 'INACTIVE') {
-      return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng này đã ở trạng thái vô hiệu hóa từ trước.', 200);
+      return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng này hiện đã bị vô hiệu hóa từ trước.', 200);
     }
 
     customer.status = 'INACTIVE';
     await customer.save();
 
-    return sendSuccess(res, sanitizeCustomer(customer), 'Vô hiệu hóa khách hàng thành công! Lịch sử giao dịch được bảo toàn.', 200);
+    return sendSuccess(res, sanitizeCustomer(customer), 'Khách hàng đã được vô hiệu hóa thành công.', 200);
   } catch (error) {
-    return sendError(res, 'Không thể vô hiệu hóa khách hàng. Vui lòng thử lại sau!', 500);
+    return sendError(res, 'Không thể vô hiệu hóa khách hàng vào lúc này. Vui lòng thử lại sau.', 500);
   }
 };
 
@@ -258,7 +266,7 @@ exports.activateCustomer = async (req, res) => {
       return sendError(res, 'Khách hàng không tồn tại hoặc ID không hợp lệ!', 404);
     }
 
-    const customer = await User.findOne({ _id: id, role: 'CUSTOMER' });
+    const customer = await Customer.findById(id);
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng!', 404);
     }

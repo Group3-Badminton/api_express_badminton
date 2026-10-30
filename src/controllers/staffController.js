@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const User = require('../models/user');
+const Staff = require('../models/staff');
+const Customer = require('../models/customer');
 const { sendSuccess, sendError } = require('../utils/response');
 
 const PHONE_REGEX = /^0[35789][0-9]{8}$/;
@@ -67,7 +68,7 @@ exports.getStaffs = async (req, res) => {
       }
     }
 
-    const staffs = await User.find(query)
+    const staffs = await Staff.find(query)
       .select('_id fullName email phone role status createdAt updatedAt')
       .sort({ createdAt: -1 });
 
@@ -91,7 +92,7 @@ exports.getStaffById = async (req, res) => {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
 
-    const staff = await User.findOne({ _id: id, role: 'STAFF' })
+    const staff = await Staff.findOne({ _id: id, role: 'STAFF' })
       .select('_id fullName email phone role status createdAt updatedAt');
 
     if (!staff) {
@@ -137,14 +138,16 @@ exports.createStaff = async (req, res) => {
       return sendError(res, 'Dữ liệu đầu vào không hợp lệ!', 400, errors);
     }
 
-    // Kiểm tra trùng lặp trên toàn bộ User
-    const existingEmail = await User.findOne({ email: cleanEmail });
-    if (existingEmail) {
+    // Kiểm tra trùng lặp trên Staff và Customer
+    const existingStaffEmail = await Staff.findOne({ email: cleanEmail });
+    const existingCustEmail = await Customer.findOne({ email: cleanEmail });
+    if (existingStaffEmail || existingCustEmail) {
       errors.email = 'Email này đã được sử dụng!';
     }
 
-    const existingPhone = await User.findOne({ phone: cleanPhone });
-    if (existingPhone) {
+    const existingStaffPhone = await Staff.findOne({ phone: cleanPhone });
+    const existingCustPhone = await Customer.findOne({ phone: cleanPhone });
+    if (existingStaffPhone || existingCustPhone) {
       errors.phone = 'Số điện thoại này đã được sử dụng!';
     }
 
@@ -155,7 +158,7 @@ exports.createStaff = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(rawPassword, salt);
 
-    const newStaff = await User.create({
+    const newStaff = await Staff.create({
       fullName: cleanFullName,
       email: cleanEmail,
       phone: cleanPhone,
@@ -187,7 +190,7 @@ exports.updateStaff = async (req, res) => {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
 
-    const targetStaff = await User.findOne({ _id: id, role: 'STAFF' });
+    const targetStaff = await Staff.findOne({ _id: id, role: 'STAFF' });
     if (!targetStaff) {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
@@ -215,13 +218,15 @@ exports.updateStaff = async (req, res) => {
     }
 
     // Kiểm tra trùng lặp ngoại trừ chính staff đang sửa
-    const emailConflict = await User.findOne({ email: cleanEmail, _id: { $ne: id } });
-    if (emailConflict) {
+    const emailConflictStaff = await Staff.findOne({ email: cleanEmail, _id: { $ne: id } });
+    const emailConflictCust = await Customer.findOne({ email: cleanEmail });
+    if (emailConflictStaff || emailConflictCust) {
       errors.email = 'Email này đã được sử dụng!';
     }
 
-    const phoneConflict = await User.findOne({ phone: cleanPhone, _id: { $ne: id } });
-    if (phoneConflict) {
+    const phoneConflictStaff = await Staff.findOne({ phone: cleanPhone, _id: { $ne: id } });
+    const phoneConflictCust = await Customer.findOne({ phone: cleanPhone });
+    if (phoneConflictStaff || phoneConflictCust) {
       errors.phone = 'Số điện thoại này đã được sử dụng!';
     }
 
@@ -257,7 +262,7 @@ exports.deactivateStaff = async (req, res) => {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
 
-    const targetStaff = await User.findOne({ _id: id, role: 'STAFF' });
+    const targetStaff = await Staff.findOne({ _id: id, role: 'STAFF' });
     if (!targetStaff) {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
@@ -289,7 +294,7 @@ exports.activateStaff = async (req, res) => {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }
 
-    const targetStaff = await User.findOne({ _id: id, role: 'STAFF' });
+    const targetStaff = await Staff.findOne({ _id: id, role: 'STAFF' });
     if (!targetStaff) {
       return sendError(res, 'The selected staff account is unavailable.', 404);
     }

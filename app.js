@@ -35,6 +35,7 @@ app.use("/api/prices", require('./src/routes/pricingRoutes'));
 app.use("/api/bookings", require('./src/routes/bookingRoutes'));
 app.use("/api/sessions", require('./src/routes/sessionRoutes'));
 app.use("/api/invoices", require('./src/routes/invoiceRoutes'));
+app.use("/api/notifications", require('./src/routes/notificationRoutes'));
 
 // Khôi phục các job cảnh báo sắp hết giờ & kích hoạt hủy tự động đơn trễ khi server khởi động
 const { restoreActiveSessionJobs, autoCancelLateBookings } = require('./src/schedulers/sessionScheduler');

@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const bookingSchema = new mongoose.Schema({
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Customer',
     required: true
   },
   courtId: {
@@ -134,8 +134,13 @@ const bookingSchema = new mongoose.Schema({
       },
       cancelledBy: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
+        refPath: 'cancellationHistory.cancelledByModel',
         default: null
+      },
+      cancelledByModel: {
+        type: String,
+        enum: ['Staff', 'Customer'],
+        default: 'Customer'
       },
       cancelledByRole: {
         type: String,

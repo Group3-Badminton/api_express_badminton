@@ -8,7 +8,7 @@ const invoiceSchema = new mongoose.Schema({
   },
   staffId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'Staff',
     default: null
   },
   invoiceCode: {
@@ -52,7 +52,7 @@ const invoiceSchema = new mongoose.Schema({
   customer: {
     customerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: 'Customer',
       default: null
     },
     fullName: {

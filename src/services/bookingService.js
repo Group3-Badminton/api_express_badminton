@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const Booking = require('../models/booking');
 const Court = require('../models/court');
-const User = require('../models/user');
+const Customer = require('../models/customer');
 const TimeSlot = require('../models/timeSlot');
 const Price = require('../models/price');
 const PriceRule = require('../models/priceRule');
@@ -540,7 +540,7 @@ class BookingService {
     // Tìm kiếm theo từ khóa (Mã đơn hoặc Tên/SĐT/Email khách hàng)
     if (search && search.trim()) {
       const keyword = search.trim();
-      const userMatches = await User.find({
+      const userMatches = await Customer.find({
         $or: [
           { fullName: { $regex: keyword, $options: 'i' } },
           { phone: { $regex: keyword, $options: 'i' } },
@@ -1318,7 +1318,7 @@ class BookingService {
         err.statusCode = 400;
         throw err;
       }
-      const targetCustomer = await User.findById(bodyCustomerId).select('_id status lockReason');
+      const targetCustomer = await Customer.findById(bodyCustomerId).select('_id status lockReason');
       if (!targetCustomer) {
         const err = new Error('Không tìm thấy thông tin khách hàng được chọn.');
         err.statusCode = 404;
@@ -1329,9 +1329,8 @@ class BookingService {
     // Nếu người dùng đang đăng nhập với quyền CUSTOMER
     if (currentUser && currentUser.role === 'CUSTOMER') {
       customerId = currentUser.userId || currentUser._id;
-      const activeCustomer = await User.findOne({
+      const activeCustomer = await Customer.findOne({
         _id: customerId,
-        role: 'CUSTOMER',
         status: 'ACTIVE'
       }).select('_id');
       if (!activeCustomer) {
@@ -1347,7 +1346,7 @@ class BookingService {
           ? customerEmail.trim().toLowerCase()
           : undefined;
 
-        let existingUser = await User.findOne({ phone: cleanPhone });
+        let existingUser = await Customer.findOne({ phone: cleanPhone });
         if (!existingUser) {
           const newUserData = {
             fullName: customerName?.trim() || 'Khách vãng lai',
@@ -1359,8 +1358,7 @@ class BookingService {
           if (cleanEmail) {
             newUserData.email = cleanEmail;
           }
-
-          existingUser = await User.create(newUserData);
+          existingUser = await Customer.create(newUserData);
         } else {
           if (existingUser.status !== 'ACTIVE') {
             const err = new Error(
@@ -1655,9 +1653,8 @@ class BookingService {
 
     try {
       await session.withTransaction(async () => {
-        const account = await User.findOne({
+        const account = await Customer.findOne({
           _id: customerId,
-          role: 'CUSTOMER',
           status: 'ACTIVE'
         }).session(session);
         if (!account) {
@@ -1810,10 +1807,9 @@ class BookingService {
       while (!acquired && Date.now() < acquireUntil) {
         const now = new Date();
         const leaseUntil = new Date(now.getTime() + 30000);
-        const account = await User.findOneAndUpdate(
+        const account = await Customer.findOneAndUpdate(
           {
             _id: customerId,
-            role: 'CUSTOMER',
             status: 'ACTIVE',
             $or: [
               { cancellationLockUntil: { $exists: false } },
@@ -1833,7 +1829,7 @@ class BookingService {
           acquired = true;
           break;
         }
-        const currentAccount = await User.findById(customerId).select('status lockReason').lean();
+        const currentAccount = await Customer.findById(customerId).select('status lockReason').lean();
         if (!currentAccount || currentAccount.status !== 'ACTIVE') {
           const err = new Error(
             currentAccount?.lockReason ||
@@ -1850,9 +1846,8 @@ class BookingService {
         throw err;
       }
 
-      const account = await User.findOne({
+      const account = await Customer.findOne({
         _id: customerId,
-        role: 'CUSTOMER',
         status: 'ACTIVE',
         cancellationLockToken: token
       });
@@ -1955,10 +1950,9 @@ class BookingService {
           bookingId: booking._id
         };
       }
-      const accountResult = await User.updateOne(
+      const accountResult = await Customer.updateOne(
         {
           _id: customerId,
-          role: 'CUSTOMER',
           status: 'ACTIVE',
           cancellationLockToken: token
         },
@@ -2001,7 +1995,7 @@ class BookingService {
       }
     } finally {
       if (acquired) {
-        await User.updateOne(
+        await Customer.updateOne(
           { _id: customerId, cancellationLockToken: token },
           { $unset: { cancellationLockToken: 1, cancellationLockUntil: 1 } }
         );
@@ -2984,7 +2978,7 @@ class BookingService {
       err.statusCode = 403;
       throw err;
     }
-    return User.find({ role: 'CUSTOMER' })
+    return Customer.find({})
       .select('fullName phone email address')
       .sort({ fullName: 1 })
       .lean();

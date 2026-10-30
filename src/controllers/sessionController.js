@@ -1,7 +1,8 @@
 const PlayingSession = require('../models/playingSession');
 const Booking = require('../models/booking');
 const Court = require('../models/court');
-const User = require('../models/user');
+const Customer = require('../models/customer');
+const Staff = require('../models/staff');
 const TimeSlot = require('../models/timeSlot');
 const Price = require('../models/price');
 const PriceRule = require('../models/priceRule');
@@ -402,9 +403,15 @@ const [sh, sm] = startHoursStr.split(':').map(Number);
       scheduledStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0, 0);
       scheduledEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), eh, em, 0, 0);
 
-      let customerUser = await User.findOne({ phone: walkInCustomerPhone });
+      let customerUser = await Customer.findOne({ phone: walkInCustomerPhone });
       if (!customerUser) {
-        customerUser = await User.findOne({ role: 'ADMIN' });
+        customerUser = await Customer.create({
+          fullName: walkInCustomerName || 'Khách vãng lai',
+          phone: walkInCustomerPhone || '0900000000',
+          role: 'CUSTOMER',
+          status: 'ACTIVE',
+          password: 'WALK_IN_GUEST'
+        });
       }
 
       const bookingCode = 'BK-VL-' + Date.now().toString().slice(-6);
