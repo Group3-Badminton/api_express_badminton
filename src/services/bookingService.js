@@ -351,8 +351,9 @@ class BookingService {
   }
 
   getScheduleConflictQuery(order, startOfDay, endOfDay, excludeBookingId = null) {
+    const orderCourtId = new mongoose.Types.ObjectId(order.courtId);
     const itemSchedule = {
-      courtId: order.courtId,
+      courtId: orderCourtId,
       status: { $ne: 'CANCELLED' },
       startTime: { $lt: order.endTime },
       endTime: { $gt: order.startTime }
@@ -376,7 +377,7 @@ class BookingService {
         {
           bookingDate: { $gte: startOfDay, $lte: endOfDay },
           $or: [{ items: { $exists: false } }, { items: { $size: 0 } }],
-          courtId: order.courtId,
+          courtId: orderCourtId,
           startTime: { $lt: order.endTime },
           endTime: { $gt: order.startTime }
         }
@@ -1410,16 +1411,24 @@ class BookingService {
       }
     }
 
-    if (targetOrders.length === 0 || !bookingDate) {
+    const effectiveBookingDate = bookingDate || targetOrders[0]?.bookingDate;
+    if (targetOrders.length === 0 || !effectiveBookingDate) {
       const err = new Error('Vui lòng chọn ít nhất một sân thi đấu, Ngày đặt và Khung giờ!');
       err.statusCode = 400;
       throw err;
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     for (const ord of targetOrders) {
+      const ordDateStr = ord.bookingDate || effectiveBookingDate;
+      const ordDateObj = new Date(ordDateStr);
       if (
         !ord.courtId ||
         !mongoose.Types.ObjectId.isValid(ord.courtId) ||
+        !ordDateStr ||
+        Number.isNaN(ordDateObj.getTime()) ||
         !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(ord.startTime || '') ||
         !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(ord.endTime || '') ||
         parseTimeToMinutes(ord.startTime) >= parseTimeToMinutes(ord.endTime)
@@ -1428,6 +1437,14 @@ class BookingService {
         err.statusCode = 400;
         throw err;
       }
+      const ordStartOfDay = new Date(ordDateObj);
+      ordStartOfDay.setHours(0, 0, 0, 0);
+      if (ordStartOfDay < today) {
+        const err = new Error('Không thể đặt sân cho ngày trong quá khứ!');
+        err.statusCode = 400;
+        throw err;
+      }
+      ord.bookingDate = ordDateObj;
     }
 
     const uniqueCourtIds = [...new Set(targetOrders.map((o) => o.courtId.toString()))];
@@ -1439,14 +1456,12 @@ class BookingService {
     }
 
     // 2. Kiểm tra ngày đặt không được trong quá khứ
-    const bookingDateObj = new Date(bookingDate);
-    if (!bookingDate || Number.isNaN(bookingDateObj.getTime())) {
+    const bookingDateObj = new Date(effectiveBookingDate);
+    if (!effectiveBookingDate || Number.isNaN(bookingDateObj.getTime())) {
       const err = new Error('Ngày đặt sân không hợp lệ!');
       err.statusCode = 400;
       throw err;
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     const checkDate = new Date(bookingDateObj);
     checkDate.setHours(0, 0, 0, 0);
@@ -1463,7 +1478,7 @@ class BookingService {
       await this.assertOrdersAvailable(targetOrders, bookingDateObj, null, session);
       const priceCalculation = await this.calculateBookingPrice({
         courtOrders: targetOrders,
-        bookingDate,
+        bookingDate: effectiveBookingDate,
         voucherCode
       });
       if (priceCalculation.courtBreakdowns.length !== targetOrders.length) {
@@ -1492,11 +1507,12 @@ class BookingService {
         courtType: cb.courtType,
         location: cb.location || '',
         bookingDate: new Date(cb.bookingDate || bookingDateObj),
+        status: 'ACTIVE',
         startTime: cb.startTime,
         endTime: cb.endTime,
         durationMinutes: cb.durationMinutes,
         durationHours: cb.durationHours,
-        price: cb.totalAmount,
+        price: Number.isFinite(cb.totalAmount) ? cb.totalAmount : 0,
         intervals: cb.intervals || []
       }));
       const overallStartTime = targetOrders.map((order) => order.startTime).sort()[0];
@@ -1508,6 +1524,11 @@ class BookingService {
         return `${cb.courtName} [${cb.startTime}-${cb.endTime}: ${intervals}]`;
       }).join('; ');
       const combinedNote = note ? `${note} | [Chi tiết: ${intervalSummary}]` : `[Chi tiết: ${intervalSummary}]`;
+
+      const safeTotalBasePrice = Number.isFinite(totalBasePrice) ? totalBasePrice : 0;
+      const safeDiscount = Number.isFinite(discount) ? discount : 0;
+      const safeTotalAmount = Math.max(0, safeTotalBasePrice - safeDiscount);
+
       const [newBooking] = await Booking.create([{
         bookingCode,
         customerId,
@@ -1516,9 +1537,9 @@ class BookingService {
         bookingDate: bookingDateObj,
         startTime: overallStartTime,
         endTime: overallEndTime,
-        price: totalBasePrice,
-        discount,
-        totalAmount: Math.max(0, totalBasePrice - discount),
+        price: safeTotalBasePrice,
+        discount: safeDiscount,
+        totalAmount: safeTotalAmount,
         paymentMethod: paymentMethod || 'CASH',
         paymentStatus: 'UNPAID',
         status: finalStatus,
@@ -1614,27 +1635,34 @@ class BookingService {
     };
   }
 
-  assertBookingItemsCanBeCancelled(booking, orders) {
-    if (!isPendingBooking(booking.status) && booking.status !== 'CONFIRMED') {
+  assertBookingItemsCanBeCancelled(booking, orders, isStaff = false) {
+    const allowedStatuses = isStaff
+      ? ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN']
+      : ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED'];
+    if (!allowedStatuses.includes(booking.status)) {
       const err = new Error('Chỉ đơn đang chờ duyệt hoặc đã xác nhận mới được hủy.');
       err.statusCode = 409;
       throw err;
     }
 
-    const now = new Date();
-    for (const order of orders) {
-      const startsAt = getBookingStartDate(order.bookingDate || booking.bookingDate, order.startTime);
-      if (!startsAt) {
-        const err = new Error('Không thể xác định ngày hoặc giờ bắt đầu của lịch đặt sân.');
-        err.statusCode = 409;
-        throw err;
-      }
-      if (startsAt <= now) {
-        const err = new Error(
-          `Không thể hủy vì lịch sân ${order.courtName || ''} đã đến hoặc vượt quá giờ bắt đầu (${order.startTime}).`.trim()
-        );
-        err.statusCode = 409;
-        throw err;
+    // Với Khách hàng (isStaff = false): Không được hủy khi đã đến hoặc vượt quá giờ bắt đầu
+    // Với Nhân viên / Quản trị viên (isStaff = true): Cho phép hủy khi lố giờ mà khách không chơi để giải phóng sân
+    if (!isStaff) {
+      const now = new Date();
+      for (const order of orders) {
+        const startsAt = getBookingStartDate(order.bookingDate || booking.bookingDate, order.startTime);
+        if (!startsAt) {
+          const err = new Error('Không thể xác định ngày hoặc giờ bắt đầu của lịch đặt sân.');
+          err.statusCode = 409;
+          throw err;
+        }
+        if (startsAt <= now) {
+          const err = new Error(
+            `Không thể hủy vì lịch sân ${order.courtName || ''} đã đến hoặc vượt quá giờ bắt đầu (${order.startTime}).`.trim()
+          );
+          err.statusCode = 409;
+          throw err;
+        }
       }
     }
   }
@@ -2033,7 +2061,7 @@ class BookingService {
     };
   }
 
-  async cancelBookingItemsAsStaff(id, currentUser, itemIds) {
+  async cancelBookingItemsAsStaff(id, currentUser, itemIds, note = null) {
     const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const session = await Booking.startSession();
@@ -2050,7 +2078,7 @@ class BookingService {
           throw err;
         }
         cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
+        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
 
         const previousStatus = booking.status;
         const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
@@ -2069,9 +2097,14 @@ class BookingService {
             previousStatus,
             itemId: order.itemId,
             scope: 'ITEM',
-            countsTowardMonthlyLimit: false
+            countsTowardMonthlyLimit: false,
+            note: note || undefined
           });
         });
+
+        if (note && typeof note === 'string' && note.trim()) {
+          booking.note = booking.note ? `${booking.note} | [Hủy: ${note.trim()}]` : `[Hủy: ${note.trim()}]`;
+        }
 
         if (
           booking.status === 'CANCELLED' &&
@@ -2089,7 +2122,7 @@ class BookingService {
       });
     } catch (error) {
       if (isTransactionUnsupported(error)) {
-        return this.cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds);
+        return this.cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note);
       }
       throw error;
     } finally {
@@ -2110,7 +2143,7 @@ class BookingService {
     };
   }
 
-  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds) {
+  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note = null) {
     const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const booking = await Booking.findById(id);
@@ -2120,7 +2153,7 @@ class BookingService {
       throw err;
     }
     const cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
+    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
 
     const cancelledAt = new Date();
     const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
@@ -2134,9 +2167,13 @@ class BookingService {
       previousStatus,
       itemId: order.itemId,
       scope: 'ITEM',
-      countsTowardMonthlyLimit: false
+      countsTowardMonthlyLimit: false,
+      note: note || undefined
     }));
     const updateFields = { status: nextStatus, ...totals };
+    if (note && typeof note === 'string' && note.trim()) {
+      updateFields.note = booking.note ? `${booking.note} | [Hủy: ${note.trim()}]` : `[Hủy: ${note.trim()}]`;
+    }
     const updateOptions = {
       arrayFilters: [{ 'cancelTarget._id': { $in: cancelledItemIds } }],
       returnDocument: 'after',
@@ -2392,13 +2429,13 @@ class BookingService {
       return this.cancelBookingAsCustomer(id, currentUser, updateData.itemId || null);
     }
     if (hasItemId || hasItemIds || status === 'CANCELLED') {
-      const selectedItemIds = hasItemIds ? updateData.itemIds : updateData.itemId;
+      const isItemCancellation = hasItemId || hasItemIds;
+      const selectedItemIds = hasItemIds ? updateData.itemIds : (hasItemId ? updateData.itemId : null);
       if (
         status !== 'CANCELLED' ||
-        paymentStatus ||
-        typeof note === 'string' ||
+        (isItemCancellation && paymentStatus) ||
         (hasItemId && hasItemIds) ||
-        ((hasItemId || hasItemIds) && selectedItemIds == null)
+        (isItemCancellation && selectedItemIds == null)
       ) {
         const err = new Error('Yêu cầu hủy chi tiết chỉ được gửi trạng thái CANCELLED và danh sách chi tiết.');
         err.statusCode = 400;
@@ -2407,7 +2444,8 @@ class BookingService {
       return this.cancelBookingItemsAsStaff(
         id,
         currentUser,
-        selectedItemIds == null ? null : selectedItemIds
+        selectedItemIds,
+        typeof note === 'string' ? note.trim() : null
       );
     }
 
