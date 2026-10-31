@@ -119,13 +119,13 @@ class BookingController {
         ? result.cancellationResult.lockReason
         : result.cancellationResult?.scope === 'ITEMS'
           ? 'Hủy các lịch sân đã chọn thành công!'
-        : result.cancellationResult?.scope === 'BOOKING' && req.user?.role !== 'CUSTOMER'
-          ? 'Hủy đơn đặt sân thành công!'
-        : req.user?.role === 'CUSTOMER'
-          ? (result.cancellationResult?.scope === 'ITEM' && result.status !== 'CANCELLED'
-            ? 'Hủy lịch sân trong đơn thành công!'
-            : 'Hủy đơn đặt sân thành công!')
-          : 'Cập nhật trạng thái đặt sân thành công!';
+          : result.cancellationResult?.scope === 'BOOKING' && req.user?.role !== 'CUSTOMER'
+            ? 'Hủy đơn đặt sân thành công!'
+            : req.user?.role === 'CUSTOMER'
+              ? (result.cancellationResult?.scope === 'ITEM' && result.status !== 'CANCELLED'
+                ? 'Hủy lịch sân trong đơn thành công!'
+                : 'Hủy đơn đặt sân thành công!')
+              : 'Cập nhật trạng thái đặt sân thành công!';
       return sendSuccess(res, result, message, 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);
