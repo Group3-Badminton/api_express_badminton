@@ -22,6 +22,11 @@ const staffSchema = new mongoose.Schema({
     default: '',
     trim: true
   },
+  address: {
+    type: String,
+    default: '',
+    trim: true
+  },
   role: {
     type: String,
     enum: ['ADMIN', 'STAFF'],
@@ -31,7 +36,19 @@ const staffSchema = new mongoose.Schema({
     type: String,
     enum: ['ACTIVE', 'INACTIVE'],
     default: 'ACTIVE'
+  },
+  resetOtp: {
+    type: String,
+    default: null
+  },
+  resetOtpExpiry: {
+    type: Date,
+    default: null
   }
 }, { timestamps: true });
+
+staffSchema.virtual('userId').get(function () {
+  return this._id;
+});
 
 module.exports = mongoose.model('Staff', staffSchema, 'Staff');

@@ -1,10 +1,18 @@
-const User = require('../models/user');
+const Staff = require('../models/staff');
+const Customer = require('../models/customer');
 const mongoose = require('mongoose');
 const { sendSuccess, sendError } = require('../utils/response');
 
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password -resetOtp -resetOtpExpiry');
+    const userId = req.user._id || req.user.userId;
+    let user = null;
+    if (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF') {
+      user = await Staff.findById(userId).select('-password -resetOtp -resetOtpExpiry');
+    } else {
+      user = await Customer.findById(userId).select('-password -resetOtp -resetOtpExpiry');
+    }
+
     if (!user) {
       return sendError(res, 'Không tìm thấy thông tin người dùng!', 404);
     }
@@ -17,8 +25,8 @@ exports.getProfile = async (req, res) => {
 // 2. Cập nhật Họ tên và Email (UC-05: SĐT là định danh duy nhất - chỉ đọc)
 exports.updateProfile = async (req, res) => {
   try {
-    const { fullName, email } = req.body;
-    const userId = req.user.userId;
+    const { fullName, email, address } = req.body;
+    const userId = req.user._id || req.user.userId;
 
     if (!fullName || !fullName.trim()) {
       return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
@@ -27,6 +35,9 @@ exports.updateProfile = async (req, res) => {
     const updateData = {
       fullName: fullName.trim()
     };
+    if (address !== undefined) {
+      updateData.address = address;
+    }
 
     if (email !== undefined) {
       const cleanEmail = (email || '').trim().toLowerCase();
@@ -39,24 +50,22 @@ exports.updateProfile = async (req, res) => {
         return sendError(res, 'Địa chỉ email không đúng định dạng. Vui lòng nhập lại.', 400);
       }
 
-      // Kiểm tra xem email có bị trùng với tài khoản khác không
-      const existingEmail = await User.findOne({
-        email: cleanEmail,
-        _id: { $ne: userId }
-      });
-
-      if (existingEmail) {
+      // Kiểm tra trùng email cả bên Staff lẫn Customer
+      const staffEmail = await Staff.findOne({ email: cleanEmail, _id: { $ne: userId } });
+      const custEmail = await Customer.findOne({ email: cleanEmail, _id: { $ne: userId } });
+      if (staffEmail || custEmail) {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 400);
       }
 
       updateData.email = cleanEmail;
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      updateData,
-      { new: true }
-    ).select('-password -resetOtp -resetOtpExpiry');
+    let updatedUser = null;
+    if (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF') {
+      updatedUser = await Staff.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');
+    } else {
+      updatedUser = await Customer.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');
+    }
 
     return sendSuccess(res, updatedUser, 'Thông tin hồ sơ của bạn đã được cập nhật thành công.', 200);
   } catch (error) {
@@ -66,7 +75,7 @@ exports.updateProfile = async (req, res) => {
 
 exports.getCustomers = async (req, res) => {
   try {
-    const customers = await User.find({ role: 'CUSTOMER' })
+    const customers = await Customer.find({})
       .select('_id fullName email phone status lockReason lockedAt lockedByBookingId bookingCancellationHistory accountLockHistory createdAt updatedAt')
       .sort({ createdAt: -1 })
       .lean();
@@ -82,8 +91,8 @@ exports.unlockCustomer = async (req, res) => {
       return sendError(res, 'Không tìm thấy tài khoản khách hàng!', 404);
     }
     const unlockedAt = new Date();
-    const customer = await User.findOneAndUpdate(
-      { _id: req.params.id, role: 'CUSTOMER', status: 'LOCKED' },
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, status: 'LOCKED' },
       {
         $set: {
           status: 'ACTIVE',
@@ -96,7 +105,7 @@ exports.unlockCustomer = async (req, res) => {
             action: 'UNLOCKED',
             reason: 'Admin mở khóa tài khoản.',
             occurredAt: unlockedAt,
-            performedBy: req.user.userId
+            performedBy: req.user._id || req.user.userId
           }
         }
       },

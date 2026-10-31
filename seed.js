@@ -3,7 +3,8 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcryptjs');
 
 // Import toàn bộ 12 Models thực tế của hệ thống
-const User = require('./src/models/user');
+const Staff = require('./src/models/staff');
+const Customer = require('./src/models/customer');
 const Court = require('./src/models/court');
 const TimeSlot = require('./src/models/timeSlot');
 const Price = require('./src/models/price');
@@ -26,8 +27,8 @@ async function seedData() {
 
     // 1. Dọn dẹp an toàn các collection
     await Promise.all([
-      User.deleteMany({}),
-      Court.deleteMany({}),
+      Staff.deleteMany({}),
+      Customer.deleteMany({}),
       TimeSlot.deleteMany({}),
       Price.deleteMany({}),
       PriceRule.deleteMany({}),
@@ -46,7 +47,8 @@ async function seedData() {
     const hashedPassword = await bcrypt.hash('123456', salt);
 
     // 3. Tạo USERS (ADMIN, STAFF, CUSTOMER)
-    const users = await User.create([
+    // 3. Tạo STAFF (ADMIN, STAFF)
+    const staffs = await Staff.create([
       {
         fullName: 'Quản Trị Viên',
         email: 'admin@gmail.com',
@@ -64,7 +66,11 @@ async function seedData() {
         address: '789 Trần Hưng Đạo, Cần Thơ',
         status: 'ACTIVE',
         role: 'STAFF'
-      },
+      }
+    ]);
+
+    // Tạo CUSTOMER
+    const customers = await Customer.create([
       {
         fullName: 'Nguyễn Văn Khách',
         email: 'customer@gmail.com',
@@ -96,14 +102,13 @@ async function seedData() {
         bookingCancellationHistory: []
       }
     ]);
-    console.log('👤 Đã tạo thành công 5 tài khoản User (ADMIN, STAFF, CUSTOMER).');
+    console.log('👤 Đã tạo thành công Staff & Customer.');
 
-    const adminUser = users.find((u) => u.role === 'ADMIN');
-    const staffUser = users.find((u) => u.role === 'STAFF');
-    const customer1 = users.find((u) => u.email === 'customer@gmail.com');
-    const customer2 = users.find((u) => u.email === 'lan.tran@gmail.com');
-    const customer3 = users.find((u) => u.email === 'long.le@gmail.com');
-
+    const adminUser = staffs.find((u) => u.role === 'ADMIN');
+    const staffUser = staffs.find((u) => u.role === 'STAFF');
+    const customer1 = customers.find((u) => u.email === 'customer@gmail.com');
+    const customer2 = customers.find((u) => u.email === 'lan.tran@gmail.com');
+    const customer3 = customers.find((u) => u.email === 'long.le@gmail.com');
     // 4. Tạo SÂN THI ĐẤU (COURT)
     const courts = await Court.create([
       {
