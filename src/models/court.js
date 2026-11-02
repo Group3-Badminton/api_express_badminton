@@ -1,4 +1,3 @@
-
 const mongoose = require('mongoose');
 
 const courtSchema = new mongoose.Schema(
@@ -22,7 +21,7 @@ const courtSchema = new mongoose.Schema(
 
     location: {
       type: String,
-      default: ''
+      default: 'Trong nhà'
     },
 
     status: {
@@ -61,12 +60,14 @@ const courtSchema = new mongoose.Schema(
 
     openingTime: {
       type: String,
-      default: '05:00'
+      default: '05:00',
+      match: /^([01]\d|2[0-3]):([0-5]\d)$/
     },
 
     closingTime: {
       type: String,
-      default: '23:00'
+      default: '23:00',
+      match: /^([01]\d|2[0-3]):([0-5]\d)$/
     }
   },
   {

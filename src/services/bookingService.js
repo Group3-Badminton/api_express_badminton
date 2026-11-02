@@ -1292,6 +1292,7 @@ class BookingService {
       voucherId: bodyVoucherId,
       paymentMethod = 'CASH',
       status: bodyStatus,
+      paymentStatus: bodyPaymentStatus,
       note = ''
     } = bookingData;
 
@@ -1526,7 +1527,7 @@ class BookingService {
         discount: safeDiscount,
         totalAmount: safeTotalAmount,
         paymentMethod: paymentMethod || 'CASH',
-        paymentStatus: 'UNPAID',
+        paymentStatus: (currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF') && bodyPaymentStatus === 'PAID' ? 'PAID' : 'UNPAID',
         status: finalStatus,
         items: bookingItems,
         note: combinedNote
@@ -1621,10 +1622,7 @@ class BookingService {
       ? ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN']
       : ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED'];
     if (!allowedStatuses.includes(booking.status)) {
-      const err = new Error('Chỉ đơn đang chờ duyệt hoặc đã xác nhận mới được hủy.');
-      err.statusCode = 409;
-      throw err;
-    }
+
 
     // Với Khách hàng (isStaff = false): Không được hủy khi đã đến hoặc vượt quá giờ bắt đầu
     // Với Nhân viên / Quản trị viên (isStaff = true): Cho phép hủy khi lố giờ mà khách không chơi để giải phóng sân
@@ -1647,6 +1645,7 @@ class BookingService {
       }
     }
   }
+};
 
   // CLEAN CODE: Chuẩn bị dữ liệu và tính toán nghiệp vụ hủy đơn khách hàng dùng chung
   prepareCustomerCancellationContext(account, booking, itemId = null) {
@@ -2058,7 +2057,9 @@ class BookingService {
     };
   }
 
-  async cancelBookingItemsAsStaff(id, currentUser, itemIds, note = null) {
+
+  async cancelBookingItemsAsStaff(id, currentUser, itemIds, note) {
+    const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const session = await Booking.startSession();
     let committedBooking;
@@ -2074,14 +2075,28 @@ class BookingService {
         }
         staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
 
+
         const targetItemIds = new Set(staffCtx.cancelledItemIds);
         booking.items.forEach((item) => {
           if (targetItemIds.has(item._id.toString())) item.status = 'CANCELLED';
         });
-        booking.status = staffCtx.nextStatus;
-        Object.assign(booking, staffCtx.totals);
-        staffCtx.cancellationHistory.forEach((entry) => booking.cancellationHistory.push(entry));
-        if (staffCtx.updatedNote !== booking.note) booking.note = staffCtx.updatedNote;
+        booking.status = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
+        if (note && typeof note === 'string') {
+          booking.note = booking.note ? `${booking.note} | ${note}` : note;
+        }
+        Object.assign(booking, getBookingTotalsForActiveItems(booking));
+
+        cancellationTarget.orders.forEach((order) => {
+          booking.cancellationHistory.push({
+            cancelledAt,
+            cancelledBy: actorId,
+            cancelledByRole: currentUser.role,
+            previousStatus,
+            itemId: order.itemId,
+            scope: 'ITEM',
+            countsTowardMonthlyLimit: false
+          });
+        });
 
         if (
           booking.status === 'CANCELLED' &&
@@ -2108,9 +2123,10 @@ class BookingService {
 
     return this.finalizeStaffCancellation(committedBooking, staffCtx.cancellationTarget, isWholeBookingRequest, id);
   }
-
   // CLEAN CODE: Xử lý hủy lịch theo từng sân hoặc cả đơn cho nhân viên (fallback khi không có replica set)
   async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note = null) {
+
+
     const isWholeBookingRequest = itemIds == null;
     const booking = await Booking.findById(id);
     if (!booking) {
@@ -2121,9 +2137,12 @@ class BookingService {
     const staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
     const { actorId, cancellationTarget, cancelledAt, cancelledItemIds, previousStatus, nextStatus, totals, cancellationHistory, updatedNote } = staffCtx;
 
+
     const updateFields = { status: nextStatus, ...totals };
-    if (updatedNote !== booking.note) {
-      updateFields.note = updatedNote;
+
+    if (note && typeof note === 'string') {
+      updateFields.note = booking.note ? `${booking.note} | ${note}` : note;
+
     }
     const updateOptions = {
       arrayFilters: [{ 'cancelTarget._id': { $in: cancelledItemIds } }],
@@ -2397,6 +2416,7 @@ class BookingService {
       if (
         status !== 'CANCELLED' ||
         (isItemCancellation && paymentStatus) ||
+        paymentStatus ||
         (hasItemId && hasItemIds) ||
         (isItemCancellation && selectedItemIds == null)
       ) {
@@ -2408,7 +2428,8 @@ class BookingService {
         id,
         currentUser,
         selectedItemIds,
-        typeof note === 'string' ? note.trim() : null
+        typeof note === 'string' ? note.trim() : null,
+
       );
     }
 
