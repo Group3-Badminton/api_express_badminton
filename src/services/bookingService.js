@@ -1304,6 +1304,7 @@ class BookingService {
       voucherId: bodyVoucherId,
       paymentMethod = 'CASH',
       status: bodyStatus,
+      paymentStatus: bodyPaymentStatus,
       note = ''
     } = bookingData;
 
@@ -1518,7 +1519,7 @@ class BookingService {
         discount,
         totalAmount: Math.max(0, totalBasePrice - discount),
         paymentMethod: paymentMethod || 'CASH',
-        paymentStatus: 'UNPAID',
+        paymentStatus: (currentUser?.role === 'ADMIN' || currentUser?.role === 'STAFF') && bodyPaymentStatus === 'PAID' ? 'PAID' : 'UNPAID',
         status: finalStatus,
         items: bookingItems,
         note: combinedNote
@@ -1612,11 +1613,15 @@ class BookingService {
     };
   }
 
-  assertBookingItemsCanBeCancelled(booking, orders) {
+  assertBookingItemsCanBeCancelled(booking, orders, isStaff = false) {
     if (!isPendingBooking(booking.status) && booking.status !== 'CONFIRMED') {
       const err = new Error('Chỉ đơn đang chờ duyệt hoặc đã xác nhận mới được hủy.');
       err.statusCode = 409;
       throw err;
+    }
+
+    if (isStaff) {
+      return;
     }
 
     const now = new Date();
@@ -2027,7 +2032,7 @@ class BookingService {
     };
   }
 
-  async cancelBookingItemsAsStaff(id, currentUser, itemIds) {
+  async cancelBookingItemsAsStaff(id, currentUser, itemIds, note) {
     const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const session = await Booking.startSession();
@@ -2044,7 +2049,7 @@ class BookingService {
           throw err;
         }
         cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
+        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
 
         const previousStatus = booking.status;
         const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
@@ -2053,6 +2058,9 @@ class BookingService {
           if (targetItemIds.has(item._id.toString())) item.status = 'CANCELLED';
         });
         booking.status = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
+        if (note && typeof note === 'string') {
+          booking.note = booking.note ? `${booking.note} | ${note}` : note;
+        }
         Object.assign(booking, getBookingTotalsForActiveItems(booking));
 
         cancellationTarget.orders.forEach((order) => {
@@ -2083,7 +2091,7 @@ class BookingService {
       });
     } catch (error) {
       if (isTransactionUnsupported(error)) {
-        return this.cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds);
+        return this.cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note);
       }
       throw error;
     } finally {
@@ -2104,7 +2112,7 @@ class BookingService {
     };
   }
 
-  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds) {
+  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note) {
     const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const booking = await Booking.findById(id);
@@ -2114,7 +2122,7 @@ class BookingService {
       throw err;
     }
     const cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
+    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
 
     const cancelledAt = new Date();
     const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
@@ -2131,6 +2139,9 @@ class BookingService {
       countsTowardMonthlyLimit: false
     }));
     const updateFields = { status: nextStatus, ...totals };
+    if (note && typeof note === 'string') {
+      updateFields.note = booking.note ? `${booking.note} | ${note}` : note;
+    }
     const updateOptions = {
       arrayFilters: [{ 'cancelTarget._id': { $in: cancelledItemIds } }],
       returnDocument: 'after',
@@ -2390,7 +2401,6 @@ class BookingService {
       if (
         status !== 'CANCELLED' ||
         paymentStatus ||
-        typeof note === 'string' ||
         (hasItemId && hasItemIds) ||
         ((hasItemId || hasItemIds) && selectedItemIds == null)
       ) {
@@ -2401,7 +2411,8 @@ class BookingService {
       return this.cancelBookingItemsAsStaff(
         id,
         currentUser,
-        selectedItemIds == null ? null : selectedItemIds
+        selectedItemIds == null ? null : selectedItemIds,
+        note
       );
     }
 
