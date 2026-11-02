@@ -1617,126 +1617,29 @@ class BookingService {
     };
   }
 
-  assertBookingItemsCanBeCancelled(booking, orders, isStaff = false) {
-    const allowedStatuses = isStaff
-      ? ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED', 'CHECKED_IN']
-      : ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED'];
-    if (!allowedStatuses.includes(booking.status)) {
-
-
-    // Với Khách hàng (isStaff = false): Không được hủy khi đã đến hoặc vượt quá giờ bắt đầu
-    // Với Nhân viên / Quản trị viên (isStaff = true): Cho phép hủy khi lố giờ mà khách không chơi để giải phóng sân
-    if (!isStaff) {
-      const now = new Date();
-      for (const order of orders) {
-        const startsAt = getBookingStartDate(order.bookingDate || booking.bookingDate, order.startTime);
-        if (!startsAt) {
-          const err = new Error('Không thể xác định ngày hoặc giờ bắt đầu của lịch đặt sân.');
-          err.statusCode = 409;
-          throw err;
-        }
-        if (startsAt <= now) {
-          const err = new Error(
-            `Không thể hủy vì lịch sân ${order.courtName || ''} đã đến hoặc vượt quá giờ bắt đầu (${order.startTime}).`.trim()
-          );
-          err.statusCode = 409;
-          throw err;
-        }
-      }
-    }
-  }
-};
-
-  // CLEAN CODE: Chuẩn bị dữ liệu và tính toán nghiệp vụ hủy đơn khách hàng dùng chung
-  prepareCustomerCancellationContext(account, booking, itemId = null) {
-    const customerId = account._id.toString();
-    if (booking.customerId.toString() !== customerId) {
-      const err = new Error('Bạn không có quyền hủy đơn đặt sân này.');
-      err.statusCode = 403;
-      throw err;
-    }
-    const cancellationTarget = this.getBookingCancellationTarget(booking, itemId);
-    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
-
-    const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
-    const cancelledAt = new Date();
-    const previousStatus = booking.status;
-    const cancellationScope = itemId ? 'ITEM' : 'BOOKING';
-    const countsTowardMonthlyLimit = previousStatus === 'CONFIRMED' && cancellationTarget.cancelsWholeBooking;
-    const previousCount = countMonthlyConfirmedCancellations(account.bookingCancellationHistory, cancelledAt);
-
-    if (countsTowardMonthlyLimit && previousCount >= CUSTOMER_CANCELLATION_LIMIT) {
-      const err = new Error(CUSTOMER_CANCELLATION_LOCK_REASON);
-      err.statusCode = 403;
+  assertBookingItemsCanBeCancelled(booking, orders) {
+    if (!isPendingBooking(booking.status) && booking.status !== 'CONFIRMED') {
+      const err = new Error('Chỉ đơn đang chờ duyệt hoặc đã xác nhận mới được hủy.');
+      err.statusCode = 409;
       throw err;
     }
 
-    const cancellationCount = countsTowardMonthlyLimit ? previousCount + 1 : previousCount;
-    const accountLocked = countsTowardMonthlyLimit && cancellationCount === CUSTOMER_CANCELLATION_LIMIT;
-
-    const audit = {
-      bookingId: booking._id,
-      bookingCode: booking.bookingCode,
-      cancelledAt,
-      previousStatus,
-      itemId: itemId || null,
-      scope: cancellationScope,
-      countsTowardMonthlyLimit
-    };
-
-    const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
-    const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
-
-    return {
-      cancellationTarget,
-      cancelledItemIds,
-      cancelledAt,
-      previousStatus,
-      cancellationScope,
-      countsTowardMonthlyLimit,
-      cancellationCount,
-      accountLocked,
-      audit,
-      nextStatus,
-      totals
-    };
-  }
-
-  // CLEAN CODE: Gửi thông báo hủy đơn tới khách hàng
-  async sendCustomerCancellationNotification(booking) {
-    if (!booking) return;
-    try {
-      await Notification.create({
-        recipientId: booking.customerId,
-        recipientType: 'CUSTOMER',
-        type: 'BOOKING_CANCELLED',
-        title: booking.status === 'CANCELLED'
-          ? 'Đơn đặt sân đã bị hủy'
-          : 'Lịch sân trong đơn đã bị hủy',
-        message: booking.status === 'CANCELLED'
-          ? `Đơn đặt sân #${booking.bookingCode} đã được bạn hủy.`
-          : `Bạn đã hủy một lịch sân trong đơn #${booking.bookingCode}.`,
-        isRead: false
-      });
-    } catch (notifErr) {
-      // Bỏ qua lỗi notification không làm gián đoạn luồng chính
-    }
-  }
-
-  // CLEAN CODE: Định dạng kết quả hoàn tất hủy đơn khách hàng
-  async finalizeCustomerCancellation(booking, ctx, id) {
-    await this.sendCustomerCancellationNotification(booking);
-    const populated = await this.loadPopulatedBooking(id);
-    return {
-      ...populated,
-      cancellationResult: {
-        cancellationCount: ctx.cancellationCount,
-        accountLocked: ctx.accountLocked,
-        lockReason: ctx.accountLocked ? CUSTOMER_CANCELLATION_LOCK_REASON : '',
-        scope: ctx.cancellationScope,
-        cancelledItemIds: ctx.cancelledItemIds
+    const now = new Date();
+    for (const order of orders) {
+      const startsAt = getBookingStartDate(order.bookingDate || booking.bookingDate, order.startTime);
+      if (!startsAt) {
+        const err = new Error('Không thể xác định ngày hoặc giờ bắt đầu của lịch đặt sân.');
+        err.statusCode = 409;
+        throw err;
       }
-    };
+      if (startsAt <= now) {
+        const err = new Error(
+          `Không thể hủy vì lịch sân ${order.courtName || ''} đã đến hoặc vượt quá giờ bắt đầu (${order.startTime}).`.trim()
+        );
+        err.statusCode = 409;
+        throw err;
+      }
+    }
   }
 
   async cancelBookingAsCustomer(id, currentUser, itemId = null) {
@@ -2073,7 +1976,8 @@ class BookingService {
           err.statusCode = 404;
           throw err;
         }
-        staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
+        cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
+        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
 
 
         const targetItemIds = new Set(staffCtx.cancelledItemIds);
@@ -2121,12 +2025,22 @@ class BookingService {
       await session.endSession();
     }
 
-    return this.finalizeStaffCancellation(committedBooking, staffCtx.cancellationTarget, isWholeBookingRequest, id);
+    await this.notifyStaffBookingItemsCancelled(
+      committedBooking,
+      cancellationTarget.orders,
+      isWholeBookingRequest
+    );
+    return {
+      ...(await this.loadPopulatedBooking(id)),
+      cancellationResult: {
+        scope: isWholeBookingRequest ? 'BOOKING' : 'ITEMS',
+        cancelledItemIds: cancellationTarget.orders.map((order) => order.itemId).filter(Boolean)
+      }
+    };
   }
-  // CLEAN CODE: Xử lý hủy lịch theo từng sân hoặc cả đơn cho nhân viên (fallback khi không có replica set)
-  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note = null) {
 
-
+  async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds) {
+    const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const booking = await Booking.findById(id);
     if (!booking) {
@@ -2134,16 +2048,24 @@ class BookingService {
       err.statusCode = 404;
       throw err;
     }
-    const staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
-    const { actorId, cancellationTarget, cancelledAt, cancelledItemIds, previousStatus, nextStatus, totals, cancellationHistory, updatedNote } = staffCtx;
+    const cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
+    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
 
-
+    const cancelledAt = new Date();
+    const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
+    const previousStatus = booking.status;
+    const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
+    const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
+    const cancellationHistory = cancellationTarget.orders.map((order) => ({
+      cancelledAt,
+      cancelledBy: actorId,
+      cancelledByRole: currentUser.role,
+      previousStatus,
+      itemId: order.itemId,
+      scope: 'ITEM',
+      countsTowardMonthlyLimit: false
+    }));
     const updateFields = { status: nextStatus, ...totals };
-
-    if (note && typeof note === 'string') {
-      updateFields.note = booking.note ? `${booking.note} | ${note}` : note;
-
-    }
     const updateOptions = {
       arrayFilters: [{ 'cancelTarget._id': { $in: cancelledItemIds } }],
       returnDocument: 'after',
@@ -2427,9 +2349,7 @@ class BookingService {
       return this.cancelBookingItemsAsStaff(
         id,
         currentUser,
-        selectedItemIds,
-        typeof note === 'string' ? note.trim() : null,
-
+        selectedItemIds == null ? null : selectedItemIds
       );
     }
 
