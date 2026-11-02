@@ -569,8 +569,8 @@ class BookingService {
       Booking.find(filter)
         .populate('customerId', 'fullName email phone address')
         .populate('courtId', 'courtName courtType location description')
-        .populate('items.courtId', 'courtName courtType location description')
-        .populate('voucherId', 'voucherCode voucherName discountType discountValue maxDiscount')
+        // CLEAN CODE: Lấy đầy đủ các trường voucher từ MongoDB (code, name, maxDiscountAmount)
+        .populate('voucherId', 'code name maxDiscountAmount voucherCode voucherName discountType discountValue maxDiscount')
         .sort(sort)
         .skip(skip)
         .limit(limitNum)
@@ -647,8 +647,8 @@ class BookingService {
     const booking = await Booking.findById(id)
       .populate('customerId', 'fullName email phone address')
       .populate('courtId', 'courtName courtType location description')
-      .populate('items.courtId', 'courtName courtType location description')
-      .populate('voucherId', 'voucherCode voucherName discountType discountValue maxDiscount')
+      // CLEAN CODE: Lấy đầy đủ các trường voucher từ MongoDB
+      .populate('voucherId', 'code name maxDiscountAmount voucherCode voucherName discountType discountValue maxDiscount')
       .lean();
 
     if (!booking) {
@@ -1011,20 +1011,7 @@ class BookingService {
       const dayOfWeek = orderDate.getDay();
       return dayOfWeek === 0 || dayOfWeek === 6 ? 'WEEKEND' : 'WEEKDAY';
     };
-    const priceDateConditions = targetOrders.map((order) => {
-      const date = new Date(order.bookingDate || bookingDate || Date.now());
-      const startOfDay = new Date(date);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(date);
-      endOfDay.setHours(23, 59, 59, 999);
-      return {
-        dayType: dayTypeForOrder(order),
-        $and: [
-          { $or: [{ effectiveFrom: { $lte: endOfDay } }, { effectiveFrom: { $exists: false } }] },
-          { $or: [{ effectiveTo: { $gte: startOfDay } }, { effectiveTo: null }, { effectiveTo: { $exists: false } }] }
-        ]
-      };
-    });
+    // CLEAN CODE: Đã loại bỏ biến chết priceDateConditions không sử dụng
 
     const [allPrices, allPriceRules, allTimeSlots] = await Promise.all([
       Price.find({
@@ -1242,7 +1229,7 @@ class BookingService {
           (!voucher.endDate || now <= new Date(voucher.endDate));
         const isExistingVoucher = existingVoucherId && voucher._id.toString() === existingVoucherId.toString();
         const hasLimit = isExistingVoucher || voucher.usageLimit <= 0 || voucher.usedCount < voucher.usageLimit;
-        
+
         // Phương án A: Lọc các sân thỏa mãn loại sân áp dụng của voucher
         const applicableTypes = voucher.applicableCourtTypes || ['ALL'];
         const applicableBreakdowns = courtBreakdowns.filter((cb) =>
@@ -1565,12 +1552,7 @@ class BookingService {
       console.warn('Không thể tạo thông báo:', notifErr.message);
     }
 
-    const populatedBooking = await Booking.findById(created.booking._id)
-      .populate('customerId', 'fullName email phone address')
-      .populate('courtId', 'courtName courtType location description')
-      .populate('items.courtId', 'courtName courtType location description')
-      .populate('voucherId', 'voucherCode voucherName discountType discountValue')
-      .lean();
+    const populatedBooking = await this.loadPopulatedBooking(created.booking._id); // CLEAN CODE: Tái sử dụng loadPopulatedBooking
 
     return {
       ...populatedBooking,
@@ -1587,7 +1569,8 @@ class BookingService {
       .populate('customerId', 'fullName email phone address')
       .populate('courtId', 'courtName courtType location description')
       .populate('items.courtId', 'courtName courtType location description')
-      .populate('voucherId', 'voucherCode voucherName discountType discountValue')
+      // CLEAN CODE: Lấy đầy đủ các trường voucher từ MongoDB
+      .populate('voucherId', 'code name maxDiscountAmount voucherCode voucherName discountType discountValue maxDiscount')
       .lean();
   }
 
@@ -1665,14 +1648,103 @@ class BookingService {
     }
   }
 
+  // CLEAN CODE: Chuẩn bị dữ liệu và tính toán nghiệp vụ hủy đơn khách hàng dùng chung
+  prepareCustomerCancellationContext(account, booking, itemId = null) {
+    const customerId = account._id.toString();
+    if (booking.customerId.toString() !== customerId) {
+      const err = new Error('Bạn không có quyền hủy đơn đặt sân này.');
+      err.statusCode = 403;
+      throw err;
+    }
+    const cancellationTarget = this.getBookingCancellationTarget(booking, itemId);
+    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
+
+    const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
+    const cancelledAt = new Date();
+    const previousStatus = booking.status;
+    const cancellationScope = itemId ? 'ITEM' : 'BOOKING';
+    const countsTowardMonthlyLimit = previousStatus === 'CONFIRMED' && cancellationTarget.cancelsWholeBooking;
+    const previousCount = countMonthlyConfirmedCancellations(account.bookingCancellationHistory, cancelledAt);
+
+    if (countsTowardMonthlyLimit && previousCount >= CUSTOMER_CANCELLATION_LIMIT) {
+      const err = new Error(CUSTOMER_CANCELLATION_LOCK_REASON);
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const cancellationCount = countsTowardMonthlyLimit ? previousCount + 1 : previousCount;
+    const accountLocked = countsTowardMonthlyLimit && cancellationCount === CUSTOMER_CANCELLATION_LIMIT;
+
+    const audit = {
+      bookingId: booking._id,
+      bookingCode: booking.bookingCode,
+      cancelledAt,
+      previousStatus,
+      itemId: itemId || null,
+      scope: cancellationScope,
+      countsTowardMonthlyLimit
+    };
+
+    const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
+    const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
+
+    return {
+      cancellationTarget,
+      cancelledItemIds,
+      cancelledAt,
+      previousStatus,
+      cancellationScope,
+      countsTowardMonthlyLimit,
+      cancellationCount,
+      accountLocked,
+      audit,
+      nextStatus,
+      totals
+    };
+  }
+
+  // CLEAN CODE: Gửi thông báo hủy đơn tới khách hàng
+  async sendCustomerCancellationNotification(booking) {
+    if (!booking) return;
+    try {
+      await Notification.create({
+        recipientId: booking.customerId,
+        recipientType: 'CUSTOMER',
+        type: 'BOOKING_CANCELLED',
+        title: booking.status === 'CANCELLED'
+          ? 'Đơn đặt sân đã bị hủy'
+          : 'Lịch sân trong đơn đã bị hủy',
+        message: booking.status === 'CANCELLED'
+          ? `Đơn đặt sân #${booking.bookingCode} đã được bạn hủy.`
+          : `Bạn đã hủy một lịch sân trong đơn #${booking.bookingCode}.`,
+        isRead: false
+      });
+    } catch (notifErr) {
+      // Bỏ qua lỗi notification không làm gián đoạn luồng chính
+    }
+  }
+
+  // CLEAN CODE: Định dạng kết quả hoàn tất hủy đơn khách hàng
+  async finalizeCustomerCancellation(booking, ctx, id) {
+    await this.sendCustomerCancellationNotification(booking);
+    const populated = await this.loadPopulatedBooking(id);
+    return {
+      ...populated,
+      cancellationResult: {
+        cancellationCount: ctx.cancellationCount,
+        accountLocked: ctx.accountLocked,
+        lockReason: ctx.accountLocked ? CUSTOMER_CANCELLATION_LOCK_REASON : '',
+        scope: ctx.cancellationScope,
+        cancelledItemIds: ctx.cancelledItemIds
+      }
+    };
+  }
+
   async cancelBookingAsCustomer(id, currentUser, itemId = null) {
     const customerId = currentUser.userId || currentUser._id;
     const session = await Booking.startSession();
     let committedBooking;
-    let cancellationCount = 0;
-    let accountLocked = false;
-    let cancelledItemIds = [];
-    const cancellationScope = itemId ? 'ITEM' : 'BOOKING';
+    let cancellationCtx;
 
     try {
       await session.withTransaction(async () => {
@@ -1692,64 +1764,30 @@ class BookingService {
           err.statusCode = 404;
           throw err;
         }
-        if (booking.customerId.toString() !== customerId.toString()) {
-          const err = new Error('Bạn không có quyền hủy đơn đặt sân này.');
-          err.statusCode = 403;
-          throw err;
-        }
-        const cancellationTarget = this.getBookingCancellationTarget(booking, itemId);
-        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
-        cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
 
-        const cancelledAt = new Date();
-        const previousStatus = booking.status;
-        const countsTowardMonthlyLimit = previousStatus === 'CONFIRMED' &&
-          cancellationTarget.cancelsWholeBooking;
-        const previousCount = countMonthlyConfirmedCancellations(
-          account.bookingCancellationHistory,
-          cancelledAt
-        );
-        if (countsTowardMonthlyLimit && previousCount >= CUSTOMER_CANCELLATION_LIMIT) {
-          const err = new Error(CUSTOMER_CANCELLATION_LOCK_REASON);
-          err.statusCode = 403;
-          throw err;
-        }
-        cancellationCount = countsTowardMonthlyLimit ? previousCount + 1 : previousCount;
-        accountLocked = countsTowardMonthlyLimit &&
-          cancellationCount === CUSTOMER_CANCELLATION_LIMIT;
+        cancellationCtx = this.prepareCustomerCancellationContext(account, booking, itemId);
+        const targetItemIds = new Set(cancellationCtx.cancelledItemIds);
 
-        const audit = {
-          bookingId: booking._id,
-          bookingCode: booking.bookingCode,
-          cancelledAt,
-          previousStatus,
-          itemId: itemId || null,
-          scope: itemId ? 'ITEM' : 'BOOKING',
-          countsTowardMonthlyLimit
-        };
-        const targetItemIds = new Set(
-          cancellationTarget.orders.map((order) => order.itemId).filter(Boolean)
-        );
         if (Array.isArray(booking.items) && booking.items.length > 0) {
           booking.items.forEach((item) => {
             if (targetItemIds.has(item._id.toString())) item.status = 'CANCELLED';
           });
-          booking.status = booking.items.every((item) => item.status === 'CANCELLED')
-            ? 'CANCELLED'
-            : previousStatus;
+          booking.status = cancellationCtx.nextStatus;
         } else {
           booking.status = 'CANCELLED';
         }
-        Object.assign(booking, getBookingTotalsForActiveItems(booking));
+
+        Object.assign(booking, cancellationCtx.totals);
         booking.cancellationHistory.push({
-          cancelledAt,
+          cancelledAt: cancellationCtx.cancelledAt,
           cancelledBy: customerId,
           cancelledByRole: 'CUSTOMER',
-          previousStatus,
+          previousStatus: cancellationCtx.previousStatus,
           itemId: itemId || null,
-          scope: cancellationScope,
-          countsTowardMonthlyLimit
+          scope: cancellationCtx.cancellationScope,
+          countsTowardMonthlyLimit: cancellationCtx.countsTowardMonthlyLimit
         });
+
         if (booking.status === 'CANCELLED' && booking.voucherId) {
           await Voucher.updateOne(
             { _id: booking.voucherId },
@@ -1759,17 +1797,17 @@ class BookingService {
         }
         await booking.save({ session });
 
-        account.bookingCancellationHistory.push(audit);
+        account.bookingCancellationHistory.push(cancellationCtx.audit);
         account.bookingCancellationVersion += 1;
-        if (accountLocked) {
+        if (cancellationCtx.accountLocked) {
           account.status = 'LOCKED';
           account.lockReason = CUSTOMER_CANCELLATION_LOCK_REASON;
-          account.lockedAt = cancelledAt;
+          account.lockedAt = cancellationCtx.cancelledAt;
           account.lockedByBookingId = booking._id;
           account.accountLockHistory.push({
             action: 'LOCKED',
             reason: CUSTOMER_CANCELLATION_LOCK_REASON,
-            occurredAt: cancelledAt,
+            occurredAt: cancellationCtx.cancelledAt,
             performedBy: customerId,
             bookingId: booking._id
           });
@@ -1786,44 +1824,14 @@ class BookingService {
       await session.endSession();
     }
 
-    try {
-      await Notification.create({
-        recipientId: committedBooking.customerId,
-        recipientType: 'CUSTOMER',
-        type: 'BOOKING_CANCELLED',
-        title: committedBooking.status === 'CANCELLED'
-          ? 'Đơn đặt sân đã bị hủy'
-          : 'Lịch sân trong đơn đã bị hủy',
-        message: committedBooking.status === 'CANCELLED'
-          ? `Đơn đặt sân #${committedBooking.bookingCode} đã được bạn hủy.`
-          : `Bạn đã hủy một lịch sân trong đơn #${committedBooking.bookingCode}.`,
-        isRead: false
-      });
-    } catch (notifErr) {
-      console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
-    }
-
-    const result = await this.loadPopulatedBooking(id);
-    return {
-      ...result,
-      cancellationResult: {
-        cancellationCount,
-        accountLocked,
-        lockReason: accountLocked ? CUSTOMER_CANCELLATION_LOCK_REASON : '',
-        scope: cancellationScope,
-        cancelledItemIds
-      }
-    };
+    return this.finalizeCustomerCancellation(committedBooking, cancellationCtx, id);
   }
 
   async cancelBookingAsCustomerWithoutTransaction(id, customerId, itemId = null) {
     const token = require('crypto').randomUUID();
     let acquired = false;
     let savedBooking;
-    let cancellationCount = 0;
-    let accountLocked = false;
-    let cancellationScope = itemId ? 'ITEM' : 'BOOKING';
-    let cancelledItemIds = [];
+    let cancellationCtx;
     const acquireUntil = Date.now() + 5000;
 
     try {
@@ -1885,62 +1893,27 @@ class BookingService {
         err.statusCode = 404;
         throw err;
       }
-      if (booking.customerId.toString() !== customerId.toString()) {
-        const err = new Error('Bạn không có quyền hủy đơn đặt sân này.');
-        err.statusCode = 403;
-        throw err;
-      }
-      const cancellationTarget = this.getBookingCancellationTarget(booking, itemId);
-      this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders);
-      cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
 
-      const cancelledAt = new Date();
-      const previousStatus = booking.status;
-      const countsTowardMonthlyLimit = previousStatus === 'CONFIRMED' &&
-        cancellationTarget.cancelsWholeBooking;
-      const previousCount = countMonthlyConfirmedCancellations(
-        account.bookingCancellationHistory,
-        cancelledAt
-      );
-      if (countsTowardMonthlyLimit && previousCount >= CUSTOMER_CANCELLATION_LIMIT) {
-        const err = new Error(CUSTOMER_CANCELLATION_LOCK_REASON);
-        err.statusCode = 403;
-        throw err;
-      }
-      cancellationCount = countsTowardMonthlyLimit ? previousCount + 1 : previousCount;
-      accountLocked = countsTowardMonthlyLimit &&
-        cancellationCount === CUSTOMER_CANCELLATION_LIMIT;
-
-      const audit = {
-        bookingId: booking._id,
-        bookingCode: booking.bookingCode,
-        cancelledAt,
-        previousStatus,
-        itemId: itemId || null,
-        scope: cancellationScope,
-        countsTowardMonthlyLimit
-      };
-      const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
-      const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
-      const updateFields = { status: nextStatus, ...totals };
+      cancellationCtx = this.prepareCustomerCancellationContext(account, booking, itemId);
+      const updateFields = { status: cancellationCtx.nextStatus, ...cancellationCtx.totals };
       const updateOptions = { returnDocument: 'after', runValidators: true };
-      if (cancelledItemIds.length > 0) {
+      if (cancellationCtx.cancelledItemIds.length > 0) {
         updateFields['items.$[cancelTarget].status'] = 'CANCELLED';
-        updateOptions.arrayFilters = [{ 'cancelTarget._id': { $in: cancelledItemIds } }];
+        updateOptions.arrayFilters = [{ 'cancelTarget._id': { $in: cancellationCtx.cancelledItemIds } }];
       }
       const updated = await Booking.findOneAndUpdate(
-        { _id: booking._id, __v: booking.__v, status: previousStatus },
+        { _id: booking._id, __v: booking.__v, status: cancellationCtx.previousStatus },
         {
           $set: updateFields,
           $push: {
             cancellationHistory: {
-              cancelledAt,
+              cancelledAt: cancellationCtx.cancelledAt,
               cancelledBy: customerId,
               cancelledByRole: 'CUSTOMER',
-              previousStatus,
+              previousStatus: cancellationCtx.previousStatus,
               itemId: itemId || null,
-              scope: cancellationScope,
-              countsTowardMonthlyLimit
+              scope: cancellationCtx.cancellationScope,
+              countsTowardMonthlyLimit: cancellationCtx.countsTowardMonthlyLimit
             }
           },
           $inc: { __v: 1 }
@@ -1955,20 +1928,20 @@ class BookingService {
       savedBooking = updated;
 
       const accountUpdate = {
-        $push: { bookingCancellationHistory: audit },
+        $push: { bookingCancellationHistory: cancellationCtx.audit },
         $inc: { bookingCancellationVersion: 1 }
       };
-      if (accountLocked) {
+      if (cancellationCtx.accountLocked) {
         accountUpdate.$set = {
           status: 'LOCKED',
           lockReason: CUSTOMER_CANCELLATION_LOCK_REASON,
-          lockedAt: cancelledAt,
+          lockedAt: cancellationCtx.cancelledAt,
           lockedByBookingId: booking._id
         };
         accountUpdate.$push.accountLockHistory = {
           action: 'LOCKED',
           reason: CUSTOMER_CANCELLATION_LOCK_REASON,
-          occurredAt: cancelledAt,
+          occurredAt: cancellationCtx.cancelledAt,
           performedBy: customerId,
           bookingId: booking._id
         };
@@ -1983,23 +1956,23 @@ class BookingService {
       );
       if (accountResult.modifiedCount !== 1) {
         const rollbackFields = {
-          status: previousStatus,
+          status: cancellationCtx.previousStatus,
           price: booking.price,
           discount: booking.discount,
           totalAmount: booking.totalAmount
         };
         const rollbackOptions = {};
-        if (cancelledItemIds.length > 0) {
+        if (cancellationCtx.cancelledItemIds.length > 0) {
           rollbackFields['items.$[cancelTarget].status'] = 'ACTIVE';
-          rollbackOptions.arrayFilters = [{ 'cancelTarget._id': { $in: cancelledItemIds } }];
+          rollbackOptions.arrayFilters = [{ 'cancelTarget._id': { $in: cancellationCtx.cancelledItemIds } }];
         }
         await Booking.findOneAndUpdate(
-          { _id: savedBooking._id, __v: savedBooking.__v, status: nextStatus },
+          { _id: savedBooking._id, __v: savedBooking.__v, status: cancellationCtx.nextStatus },
           {
             $set: rollbackFields,
             $pull: {
               cancellationHistory: {
-                cancelledAt,
+                cancelledAt: cancellationCtx.cancelledAt,
                 cancelledBy: customerId
               }
             },
@@ -2013,7 +1986,7 @@ class BookingService {
         throw err;
       }
 
-      if (nextStatus === 'CANCELLED' && booking.voucherId) {
+      if (cancellationCtx.nextStatus === 'CANCELLED' && booking.voucherId) {
         await Voucher.updateOne({ _id: booking.voucherId }, { $inc: { usedCount: -1 } });
       }
     } finally {
@@ -2025,43 +1998,71 @@ class BookingService {
       }
     }
 
-    try {
-      await Notification.create({
-        recipientId: savedBooking.customerId,
-        recipientType: 'CUSTOMER',
-        type: 'BOOKING_CANCELLED',
-        title: savedBooking.status === 'CANCELLED'
-          ? 'Đơn đặt sân đã bị hủy'
-          : 'Lịch sân trong đơn đã bị hủy',
-        message: savedBooking.status === 'CANCELLED'
-          ? `Đơn đặt sân #${savedBooking.bookingCode} đã được bạn hủy.`
-          : `Bạn đã hủy một lịch sân trong đơn #${savedBooking.bookingCode}.`,
-        isRead: false
-      });
-    } catch (notifErr) {
-      console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
-    }
+    return this.finalizeCustomerCancellation(savedBooking, cancellationCtx, id);
+  }
 
-    const result = await this.loadPopulatedBooking(id);
+  // CLEAN CODE: Chuẩn bị dữ liệu và tính toán nghiệp vụ hủy đơn của nhân viên dùng chung
+  prepareStaffCancellationContext(booking, itemIds, currentUser, note = null) {
+    const actorId = currentUser.userId || currentUser._id;
+    const cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
+    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
+
+    const cancelledAt = new Date();
+    const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
+    const previousStatus = booking.status;
+    const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
+    const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
+
+    const cancellationHistory = cancellationTarget.orders.map((order) => ({
+      cancelledAt,
+      cancelledBy: actorId,
+      cancelledByRole: currentUser.role,
+      previousStatus,
+      itemId: order.itemId,
+      scope: 'ITEM',
+      countsTowardMonthlyLimit: false,
+      note: note || undefined
+    }));
+
+    const cleanNote = note && typeof note === 'string' && note.trim() ? note.trim() : null;
+    const updatedNote = cleanNote
+      ? (booking.note ? `${booking.note} | [Hủy: ${cleanNote}]` : `[Hủy: ${cleanNote}]`)
+      : booking.note;
+
     return {
-      ...result,
+      actorId,
+      cancellationTarget,
+      cancelledAt,
+      cancelledItemIds,
+      previousStatus,
+      nextStatus,
+      totals,
+      cancellationHistory,
+      updatedNote
+    };
+  }
+
+  // CLEAN CODE: Định dạng kết quả sau khi nhân viên hủy lịch sân
+  async finalizeStaffCancellation(booking, cancellationTarget, isWholeBookingRequest, id) {
+    await this.notifyStaffBookingItemsCancelled(
+      booking,
+      cancellationTarget.orders,
+      isWholeBookingRequest
+    );
+    return {
+      ...(await this.loadPopulatedBooking(id)),
       cancellationResult: {
-        cancellationCount,
-        accountLocked,
-        lockReason: accountLocked ? CUSTOMER_CANCELLATION_LOCK_REASON : '',
-        scope: cancellationScope,
-        cancelledItemIds
+        scope: isWholeBookingRequest ? 'BOOKING' : 'ITEMS',
+        cancelledItemIds: cancellationTarget.orders.map((order) => order.itemId).filter(Boolean)
       }
     };
   }
 
   async cancelBookingItemsAsStaff(id, currentUser, itemIds, note = null) {
-    const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const session = await Booking.startSession();
     let committedBooking;
-    let cancellationTarget;
-    const cancelledAt = new Date();
+    let staffCtx;
 
     try {
       await session.withTransaction(async () => {
@@ -2071,38 +2072,20 @@ class BookingService {
           err.statusCode = 404;
           throw err;
         }
-        cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-        this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
+        staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
 
-        const previousStatus = booking.status;
-        const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
-        const targetItemIds = new Set(cancelledItemIds);
+        const targetItemIds = new Set(staffCtx.cancelledItemIds);
         booking.items.forEach((item) => {
           if (targetItemIds.has(item._id.toString())) item.status = 'CANCELLED';
         });
-        booking.status = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
-        Object.assign(booking, getBookingTotalsForActiveItems(booking));
-
-        cancellationTarget.orders.forEach((order) => {
-          booking.cancellationHistory.push({
-            cancelledAt,
-            cancelledBy: actorId,
-            cancelledByRole: currentUser.role,
-            previousStatus,
-            itemId: order.itemId,
-            scope: 'ITEM',
-            countsTowardMonthlyLimit: false,
-            note: note || undefined
-          });
-        });
-
-        if (note && typeof note === 'string' && note.trim()) {
-          booking.note = booking.note ? `${booking.note} | [Hủy: ${note.trim()}]` : `[Hủy: ${note.trim()}]`;
-        }
+        booking.status = staffCtx.nextStatus;
+        Object.assign(booking, staffCtx.totals);
+        staffCtx.cancellationHistory.forEach((entry) => booking.cancellationHistory.push(entry));
+        if (staffCtx.updatedNote !== booking.note) booking.note = staffCtx.updatedNote;
 
         if (
           booking.status === 'CANCELLED' &&
-          !['CANCELLED', 'REJECTED'].includes(previousStatus) &&
+          !['CANCELLED', 'REJECTED'].includes(staffCtx.previousStatus) &&
           booking.voucherId
         ) {
           await Voucher.updateOne(
@@ -2123,22 +2106,11 @@ class BookingService {
       await session.endSession();
     }
 
-    await this.notifyStaffBookingItemsCancelled(
-      committedBooking,
-      cancellationTarget.orders,
-      isWholeBookingRequest
-    );
-    return {
-      ...(await this.loadPopulatedBooking(id)),
-      cancellationResult: {
-        scope: isWholeBookingRequest ? 'BOOKING' : 'ITEMS',
-        cancelledItemIds: cancellationTarget.orders.map((order) => order.itemId).filter(Boolean)
-      }
-    };
+    return this.finalizeStaffCancellation(committedBooking, staffCtx.cancellationTarget, isWholeBookingRequest, id);
   }
 
+  // CLEAN CODE: Xử lý hủy lịch theo từng sân hoặc cả đơn cho nhân viên (fallback khi không có replica set)
   async cancelBookingItemsAsStaffWithoutTransaction(id, currentUser, itemIds, note = null) {
-    const actorId = currentUser.userId || currentUser._id;
     const isWholeBookingRequest = itemIds == null;
     const booking = await Booking.findById(id);
     if (!booking) {
@@ -2146,27 +2118,12 @@ class BookingService {
       err.statusCode = 404;
       throw err;
     }
-    const cancellationTarget = this.getBookingCancellationTarget(booking, itemIds);
-    this.assertBookingItemsCanBeCancelled(booking, cancellationTarget.orders, true);
+    const staffCtx = this.prepareStaffCancellationContext(booking, itemIds, currentUser, note);
+    const { actorId, cancellationTarget, cancelledAt, cancelledItemIds, previousStatus, nextStatus, totals, cancellationHistory, updatedNote } = staffCtx;
 
-    const cancelledAt = new Date();
-    const cancelledItemIds = cancellationTarget.orders.map((order) => order.itemId).filter(Boolean);
-    const previousStatus = booking.status;
-    const nextStatus = cancellationTarget.cancelsWholeBooking ? 'CANCELLED' : previousStatus;
-    const totals = getBookingTotalsForActiveItems(booking, cancelledItemIds);
-    const cancellationHistory = cancellationTarget.orders.map((order) => ({
-      cancelledAt,
-      cancelledBy: actorId,
-      cancelledByRole: currentUser.role,
-      previousStatus,
-      itemId: order.itemId,
-      scope: 'ITEM',
-      countsTowardMonthlyLimit: false,
-      note: note || undefined
-    }));
     const updateFields = { status: nextStatus, ...totals };
-    if (note && typeof note === 'string' && note.trim()) {
-      updateFields.note = booking.note ? `${booking.note} | [Hủy: ${note.trim()}]` : `[Hủy: ${note.trim()}]`;
+    if (updatedNote !== booking.note) {
+      updateFields.note = updatedNote;
     }
     const updateOptions = {
       arrayFilters: [{ 'cancelTarget._id': { $in: cancelledItemIds } }],
@@ -2229,18 +2186,7 @@ class BookingService {
       }
     }
 
-    await this.notifyStaffBookingItemsCancelled(
-      updatedBooking,
-      cancellationTarget.orders,
-      isWholeBookingRequest
-    );
-    return {
-      ...(await this.loadPopulatedBooking(id)),
-      cancellationResult: {
-        scope: isWholeBookingRequest ? 'BOOKING' : 'ITEMS',
-        cancelledItemIds
-      }
-    };
+    return this.finalizeStaffCancellation(updatedBooking, cancellationTarget, isWholeBookingRequest, id);
   }
 
   async notifyStaffBookingItemsCancelled(booking, orders, isWholeBookingRequest) {
@@ -2264,24 +2210,8 @@ class BookingService {
     }
   }
 
-  async updateBookingStatusWithoutTransaction(id, updateData, currentUser, isCustomer, isStaff) {
-    const { status, paymentStatus, note } = updateData;
-    const booking = await Booking.findById(id);
-    if (!booking) {
-      const err = new Error('Không tìm thấy đơn đặt sân!');
-      err.statusCode = 404;
-      throw err;
-    }
-    if (isCustomer && booking.customerId.toString() !== (currentUser.userId || currentUser._id).toString()) {
-      const err = new Error('Bạn không có quyền cập nhật đơn đặt sân này.');
-      err.statusCode = 403;
-      throw err;
-    }
-    if (isCustomer && !(isPendingBooking(booking.status) && status === 'CANCELLED')) {
-      const err = new Error('Khách hàng chỉ được hủy đơn đang chờ duyệt.');
-      err.statusCode = 409;
-      throw err;
-    }
+  // CLEAN CODE: Kiểm tra tính hợp lệ khi chuyển đổi trạng thái đơn và thanh toán
+  validateBookingStatusTransition(booking, status, paymentStatus) {
     if (status && status === booking.status && ['CANCELLED', 'REJECTED'].includes(status)) {
       const err = new Error(`Đơn đã ở trạng thái ${status} và không thể xử lý lặp lại.`);
       err.statusCode = 409;
@@ -2298,18 +2228,13 @@ class BookingService {
       REJECTED: []
     };
     if (status && status !== booking.status && !(transitions[booking.status] || []).includes(status)) {
-      const err = new Error(`Không thể chuyển đơn từ ${booking.status} sang ${status}.`);
+      const err = new Error(
+        `Không thể chuyển đơn từ ${booking.status} sang ${status}; đơn đã xử lý không thể duyệt hoặc từ chối lại.`
+      );
       err.statusCode = 409;
       throw err;
     }
-    if (status === 'CONFIRMED') {
-      const err = new Error('Không thể xác nhận an toàn khi MongoDB không hỗ trợ transaction.');
-      err.statusCode = 503;
-      throw err;
-    }
 
-    const updateFields = {};
-    if (status) updateFields.status = status;
     if (paymentStatus) {
       if (paymentStatus === 'PAID') {
         if (booking.paymentStatus === 'PAID') {
@@ -2333,13 +2258,72 @@ class BookingService {
         err.statusCode = 409;
         throw err;
       }
-      updateFields.paymentStatus = paymentStatus;
     }
-    if (typeof note === 'string' && isStaff) {
-      updateFields.note = status === 'REJECTED'
-        ? (booking.note ? `${booking.note} | ${note}` : note)
-        : note;
+  }
+
+  // CLEAN CODE: Định dạng ghi chú khi nhân viên/admin cập nhật đơn
+  resolveUpdatedNote(existingNote, status, note, isStaff) {
+    if (typeof note !== 'string' || !isStaff) return existingNote;
+    const cleanNote = note.trim();
+    if (!cleanNote) return existingNote;
+    return status === 'REJECTED'
+      ? (existingNote ? `${existingNote} | ${cleanNote}` : cleanNote)
+      : cleanNote;
+  }
+
+  // CLEAN CODE: Gửi thông báo chuyển đổi trạng thái đơn đặt sân
+  async sendBookingStatusNotification(booking, status) {
+    if (!booking || !['CONFIRMED', 'CANCELLED', 'REJECTED'].includes(status)) return;
+    try {
+      await Notification.create({
+        recipientId: booking.customerId,
+        recipientType: 'CUSTOMER',
+        type: status === 'CONFIRMED' ? 'BOOKING_CONFIRMED' : status === 'REJECTED' ? 'BOOKING_REJECTED' : 'BOOKING_CANCELLED',
+        title: status === 'CONFIRMED' ? 'Đơn đặt sân đã được duyệt!' : status === 'REJECTED' ? 'Yêu cầu đặt sân đã bị từ chối' : 'Đơn đặt sân đã bị hủy',
+        message: status === 'CONFIRMED'
+          ? `Đơn đặt sân #${booking.bookingCode} đã được nhân viên duyệt thành công.`
+          : status === 'REJECTED'
+            ? `Đơn đặt sân #${booking.bookingCode} đã bị từ chối.`
+            : `Đơn đặt sân #${booking.bookingCode} đã bị hủy.`,
+        isRead: false
+      });
+    } catch (notifErr) {
+      console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
     }
+  }
+
+  // CLEAN CODE: Cập nhật trạng thái đơn (fallback khi không có replica set)
+  async updateBookingStatusWithoutTransaction(id, updateData, currentUser, isCustomer, isStaff) {
+    const { status, paymentStatus, note } = updateData;
+    const booking = await Booking.findById(id);
+    if (!booking) {
+      const err = new Error('Không tìm thấy đơn đặt sân!');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (isCustomer && booking.customerId.toString() !== (currentUser.userId || currentUser._id).toString()) {
+      const err = new Error('Bạn không có quyền cập nhật đơn đặt sân này.');
+      err.statusCode = 403;
+      throw err;
+    }
+    if (isCustomer && !(isPendingBooking(booking.status) && status === 'CANCELLED')) {
+      const err = new Error('Khách hàng chỉ được hủy đơn đang chờ duyệt.');
+      err.statusCode = 409;
+      throw err;
+    }
+    this.validateBookingStatusTransition(booking, status, paymentStatus);
+    if (status === 'CONFIRMED') {
+      const err = new Error('Không thể xác nhận an toàn khi MongoDB không hỗ trợ transaction.');
+      err.statusCode = 503;
+      throw err;
+    }
+
+    const updateFields = {};
+    if (status) updateFields.status = status;
+    if (paymentStatus) updateFields.paymentStatus = paymentStatus;
+    const resolvedNote = this.resolveUpdatedNote(booking.note, status, note, isStaff);
+    if (resolvedNote !== booking.note) updateFields.note = resolvedNote;
+
     const updatedBooking = await Booking.findOneAndUpdate(
       { _id: booking._id, __v: booking.__v, status: booking.status },
       { $set: updateFields, $inc: { __v: 1 } },
@@ -2358,22 +2342,7 @@ class BookingService {
       await Voucher.updateOne({ _id: booking.voucherId }, { $inc: { usedCount: -1 } });
     }
 
-    if (status === 'CANCELLED' || status === 'REJECTED') {
-      try {
-        await Notification.create({
-          recipientId: updatedBooking.customerId,
-          recipientType: 'CUSTOMER',
-          type: status === 'REJECTED' ? 'BOOKING_REJECTED' : 'BOOKING_CANCELLED',
-          title: status === 'REJECTED' ? 'Yêu cầu đặt sân đã bị từ chối' : 'Đơn đặt sân đã bị hủy',
-          message: status === 'REJECTED'
-            ? `Đơn đặt sân #${updatedBooking.bookingCode} đã bị từ chối.`
-            : `Đơn đặt sân #${updatedBooking.bookingCode} đã bị hủy.`,
-          isRead: false
-        });
-      } catch (notifErr) {
-        console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
-      }
-    }
+    await this.sendBookingStatusNotification(updatedBooking, status);
     return this.loadPopulatedBooking(id);
   }
 
@@ -2491,87 +2460,27 @@ class BookingService {
           throw err;
         }
       });
-      try {
-        await Notification.create({
-          recipientId: committedBooking.customerId,
-          recipientType: 'CUSTOMER',
-          type: 'BOOKING_CONFIRMED',
-          title: 'Đơn đặt sân đã được duyệt!',
-          message: `Đơn đặt sân #${committedBooking.bookingCode} đã được nhân viên duyệt thành công.`,
-          isRead: false
-        });
-      } catch (notifErr) {
-        console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
-      }
+      await this.sendBookingStatusNotification(committedBooking, 'CONFIRMED');
       return this.loadPopulatedBooking(id);
     }
 
     const result = await Booking.startSession();
     try {
       await result.withTransaction(async () => {
-        let bookingQuery = Booking.findById(id).session(result);
-        const booking = await bookingQuery;
+        const booking = await Booking.findById(id).session(result);
         if (!booking) {
           const err = new Error('Không tìm thấy đơn đặt sân!');
           err.statusCode = 404;
           throw err;
         }
-        if (status && status === booking.status && ['CANCELLED', 'REJECTED'].includes(status)) {
-          const err = new Error(`Đơn đã ở trạng thái ${status} và không thể xử lý lặp lại.`);
-          err.statusCode = 409;
-          throw err;
-        }
-        if (status && status !== booking.status) {
-          const transitions = {
-            PENDING: ['CONFIRMED', 'CANCELLED', 'REJECTED'],
-            PENDING_APPROVAL: ['CONFIRMED', 'CANCELLED', 'REJECTED'],
-            CONFIRMED: ['CHECKED_IN', 'CANCELLED'],
-            CHECKED_IN: ['COMPLETED', 'CANCELLED'],
-            COMPLETED: [],
-            CANCELLED: [],
-            REJECTED: []
-          };
-          if (!(transitions[booking.status] || []).includes(status)) {
-            const err = new Error(
-              `Không thể chuyển đơn từ ${booking.status} sang ${status}; đơn đã xử lý không thể duyệt hoặc từ chối lại.`
-            );
-            err.statusCode = 409;
-            throw err;
-          }
-        }
+        this.validateBookingStatusTransition(booking, status, paymentStatus);
 
         const previousStatus = booking.status;
         if (status) booking.status = status;
-        if (paymentStatus) {
-          if (paymentStatus === 'PAID') {
-            if (booking.paymentStatus === 'PAID') {
-              const err = new Error('Đơn đặt sân này đã được ghi nhận thanh toán trước đó.');
-              err.statusCode = 409;
-              throw err;
-            }
-            const effectiveStatus = status || booking.status;
-            if (!['CONFIRMED', 'CHECKED_IN', 'COMPLETED'].includes(effectiveStatus)) {
-              const err = new Error(
-                `Không thể ghi nhận thanh toán cho đơn đang ở trạng thái ${booking.status}. Chỉ ghi nhận thanh toán khi đơn đã xác nhận, đang nhận sân hoặc đã hoàn thành.`
-              );
-              err.statusCode = 409;
-              throw err;
-            }
-          }
-          if (['CANCELLED', 'REJECTED'].includes(booking.status) && !status) {
-            const err = new Error(
-              `Không thể cập nhật thanh toán cho đơn đã bị ${booking.status === 'CANCELLED' ? 'hủy' : 'từ chối'}.`
-            );
-            err.statusCode = 409;
-            throw err;
-          }
-          booking.paymentStatus = paymentStatus;
-        }
-        if (typeof note === 'string' && isStaff) {
-          booking.note = status === 'REJECTED'
-            ? (booking.note ? `${booking.note} | ${note}` : note)
-            : note;
-        }
+        if (paymentStatus) booking.paymentStatus = paymentStatus;
+        const resolvedNote = this.resolveUpdatedNote(booking.note, status, note, isStaff);
+        if (resolvedNote !== booking.note) booking.note = resolvedNote;
+
         if (
           (status === 'CANCELLED' || status === 'REJECTED') &&
           !['CANCELLED', 'REJECTED'].includes(previousStatus) &&
@@ -2595,24 +2504,7 @@ class BookingService {
       await result.endSession();
     }
 
-    if (status === 'CONFIRMED' || status === 'CANCELLED' || status === 'REJECTED') {
-      try {
-        await Notification.create({
-          recipientId: committedBooking.customerId,
-          recipientType: 'CUSTOMER',
-          type: status === 'CONFIRMED' ? 'BOOKING_CONFIRMED' : status === 'REJECTED' ? 'BOOKING_REJECTED' : 'BOOKING_CANCELLED',
-          title: status === 'CONFIRMED' ? 'Đơn đặt sân đã được duyệt!' : status === 'REJECTED' ? 'Yêu cầu đặt sân đã bị từ chối' : 'Đơn đặt sân đã bị hủy',
-          message: status === 'CONFIRMED'
-            ? `Đơn đặt sân #${committedBooking.bookingCode} đã được nhân viên duyệt thành công.`
-            : status === 'REJECTED'
-              ? `Đơn đặt sân #${committedBooking.bookingCode} đã bị từ chối.`
-              : `Đơn đặt sân #${committedBooking.bookingCode} đã bị hủy.`,
-          isRead: false
-        });
-      } catch (notifErr) {
-        console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
-      }
-    }
+    await this.sendBookingStatusNotification(committedBooking, status);
     return this.loadPopulatedBooking(id);
   }
 
