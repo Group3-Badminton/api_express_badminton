@@ -103,7 +103,19 @@ async function calculateIntervalPrice(court, startTime, endTime, date = new Date
     status: 'ACTIVE'
   }).sort({ pricePerHour: -1 });
 
-  let ratePerHour = rule ? rule.pricePerHour : (courtType === 'VIP' ? 140000 : courtType === 'PREMIUM' ? 180000 : 100000);
+  let ratePerHour = rule?.pricePerHour;
+  if (!ratePerHour) {
+    const fallbackRule = await PriceRule.findOne({
+      courtType: { $in: [courtType, 'ALL'] },
+      status: 'ACTIVE'
+    }).sort({ pricePerHour: -1 });
+    if (fallbackRule) {
+      ratePerHour = fallbackRule.pricePerHour;
+    } else {
+      const anyRule = await PriceRule.findOne({ status: 'ACTIVE' });
+      ratePerHour = anyRule?.pricePerHour || 100000;
+    }
+  }
   const [sh, sm] = (startTime || '00:00').split(':').map(Number);
   const [eh, em] = (endTime || '00:00').split(':').map(Number);
   const durationMinutes = Math.max(0, (eh * 60 + em) - (sh * 60 + sm));
