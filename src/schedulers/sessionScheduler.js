@@ -153,54 +153,81 @@ async function autoCancelLateBookings() {
     const minToday = new Date(Math.min(localStartOfDay.getTime(), utcStartOfDay.getTime()));
     const maxToday = new Date(Math.max(localEndOfDay.getTime(), utcEndOfDay.getTime()));
 
+    // 1. Tự động hủy tất cả đơn CONFIRMED ở ngày quá khứ
     const pastBookings = await Booking.find({
       status: 'CONFIRMED',
       bookingDate: { $lt: minToday }
     });
 
     for (const b of pastBookings) {
-      b.status = 'CANCELLED';
-      b.cancellationReason = 'Tự động hủy do quá hạn ngày nhận sân';
-      if (Array.isArray(b.items)) {
-        b.items.forEach((it) => {
-          it.status = 'CANCELLED';
-        });
+      try {
+        const updateDoc = {
+          $set: {
+            status: 'CANCELLED',
+            cancellationReason: 'Tự động hủy do quá hạn ngày nhận sân'
+          },
+          $push: {
+            cancellationHistory: {
+              cancelledAt: now,
+              cancelledByRole: 'STAFF',
+              previousStatus: 'CONFIRMED',
+              scope: 'BOOKING'
+            }
+          }
+        };
+        if (Array.isArray(b.items) && b.items.length > 0) {
+          updateDoc.$set['items.$[].status'] = 'CANCELLED';
+        }
+        await Booking.updateOne({ _id: b._id }, updateDoc);
+        console.log(`[AUTO-CANCEL] Đã hủy đơn quá hạn ngày #${b.bookingCode}`);
+      } catch (err) {
+        console.error(`[AUTO-CANCEL ERROR] Lỗi hủy đơn quá hạn #${b.bookingCode}:`, err.message);
       }
-      b.cancellationHistory.push({
-        cancelledAt: now,
-        cancelledByRole: 'STAFF',
-        previousStatus: 'CONFIRMED',
-        scope: 'BOOKING'
-      });
-      await b.save();
-      console.log(`[AUTO-CANCEL] Đã hủy đơn quá hạn #${b.bookingCode}`);
     }
 
+    // 2. Tự động hủy đơn trong ngày hôm nay nếu đến trễ quá 15 phút
     const todayBookings = await Booking.find({
       status: 'CONFIRMED',
       bookingDate: { $gte: minToday, $lte: maxToday }
     });
 
     for (const b of todayBookings) {
-      if (!b.startTime) continue;
-      const [sh, sm] = b.startTime.split(':').map(Number);
-      const startMin = sh * 60 + sm;
-      if (currentMinutes > startMin + 15) {
-        b.status = 'CANCELLED';
-        b.cancellationReason = 'Tự động hủy do khách đến trễ quá 15 phút so với giờ bắt đầu';
-        if (Array.isArray(b.items)) {
-          b.items.forEach((it) => {
-            it.status = 'CANCELLED';
-          });
+      try {
+        let effectiveStartTime = b.startTime;
+        if (!effectiveStartTime && Array.isArray(b.items) && b.items.length > 0) {
+          effectiveStartTime = b.items[0]?.startTime;
         }
-        b.cancellationHistory.push({
-          cancelledAt: now,
-          cancelledByRole: 'STAFF',
-          previousStatus: 'CONFIRMED',
-          scope: 'BOOKING'
-        });
-        await b.save();
-        console.log(`[AUTO-CANCEL] Đã tự động hủy đơn #${b.bookingCode} (Giờ hẹn: ${b.startTime}, trễ ${currentMinutes - startMin} phút)`);
+
+        if (!effectiveStartTime || typeof effectiveStartTime !== 'string' || !effectiveStartTime.includes(':')) {
+          continue;
+        }
+
+        const [sh, sm] = effectiveStartTime.trim().split(':').map(Number);
+        const startMin = (sh || 0) * 60 + (sm || 0);
+
+        if (currentMinutes > startMin + 15) {
+          const updateDoc = {
+            $set: {
+              status: 'CANCELLED',
+              cancellationReason: 'Tự động hủy do khách đến trễ quá 15 phút so với giờ bắt đầu'
+            },
+            $push: {
+              cancellationHistory: {
+                cancelledAt: now,
+                cancelledByRole: 'STAFF',
+                previousStatus: 'CONFIRMED',
+                scope: 'BOOKING'
+              }
+            }
+          };
+          if (Array.isArray(b.items) && b.items.length > 0) {
+            updateDoc.$set['items.$[].status'] = 'CANCELLED';
+          }
+          await Booking.updateOne({ _id: b._id }, updateDoc);
+          console.log(`[AUTO-CANCEL] Đã tự động hủy đơn #${b.bookingCode} (Giờ hẹn: ${effectiveStartTime}, trễ ${currentMinutes - startMin} phút)`);
+        }
+      } catch (err) {
+        console.error(`[AUTO-CANCEL ERROR] Lỗi hủy đơn trễ #${b.bookingCode}:`, err.message);
       }
     }
   } catch (err) {
