@@ -4,11 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node --watch ./bin/www",
-    "start": "node --watch ./bin/www",
-    "test": "node test_staff_module.js",
-    "test:booking-edit": "node test_booking_edit.js",
-    "test:booking-cancel": "node test_booking_cancel.js",
-    "test:booking-staff-cancel": "node test_booking_staff_cancel.js"
+    "start": "node --watch ./bin/www"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

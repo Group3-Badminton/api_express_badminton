@@ -325,6 +325,7 @@ exports.checkInSession = async (req, res) => {
     let playingDuration = Number(durationHours) || 1;
     const staffId = req.user?.userId;
     const now = new Date();
+    const isEarlyAccepted = acceptEarlyCheckIn === true || acceptEarlyCheckIn === "true" || acceptEarlyCheckIn === 1 || acceptEarlyCheckIn === "1";
 
     let targetBooking = null;
     let targetCourt = null;
@@ -512,7 +513,7 @@ const [sh, sm] = startHoursStr.split(':').map(Number);
       }
 
       if (bookingStartTotalMin - currentTotalMin > 15) {
-        if (!acceptEarlyCheckIn) {
+        if (!isEarlyAccepted) {
           return sendError(res, `Chưa đến thời gian nhận sân cho ca (${effectiveStartTime} - ${effectiveEndTime})! Khách đến sớm ${bookingStartTotalMin - currentTotalMin} phút. Vui lòng bật "Nhận sân sớm" nếu muốn nhận khách vào ngay.`, 400);
         }
         earlyCheckInMinutes = bookingStartTotalMin - currentTotalMin;
@@ -582,7 +583,16 @@ exports.extendSession = async (req, res) => {
       return sendError(res, 'Ca chơi không tồn tại hoặc đã kết thúc!', 400);
     }
 
+    const now = new Date();
     const currentEndTime = new Date(session.scheduledEndTime);
+    if (currentEndTime.getTime() <= now.getTime()) {
+      return sendError(
+        res,
+        'Ca chơi đã hết giờ trong quá khứ, không thể gia hạn thêm! Vui lòng thực hiện Trả sân & Xuất hóa đơn để thanh toán.',
+        400
+      );
+    }
+
     const newEndTime = new Date(currentEndTime.getTime() + minutes * 60 * 1000);
 
     const pad = (n) => String(n).padStart(2, '0');
@@ -652,9 +662,12 @@ exports.extendSession = async (req, res) => {
     await session.save();
 
     if (session.bookingId) {
-      await Booking.findByIdAndUpdate(currentBookingId, {
-        endTime: newEndHoursStr
-      });
+      const updateDoc = { endTime: newEndHoursStr };
+      const bk = await Booking.findById(currentBookingId);
+      if (bk && Array.isArray(bk.items) && bk.items.length > 0) {
+        updateDoc['items.$[].endTime'] = newEndHoursStr;
+      }
+      await Booking.findByIdAndUpdate(currentBookingId, updateDoc);
     }
 
     scheduleSessionNearEndWarning(session, session.courtId.name);
@@ -1087,6 +1100,13 @@ exports.getCourtMatrix = async (req, res) => {
       })
     );
 
+    const allCourtSessions = [...sessions];
+    activeLiveSessions.forEach((als) => {
+      if (!allCourtSessions.some((s) => s._id.toString() === als._id.toString())) {
+        allCourtSessions.push(als);
+      }
+    });
+
     const now = new Date();
     const currentHours = now.getHours();
     const currentMinutes = now.getMinutes();
@@ -1175,46 +1195,41 @@ exports.getCourtMatrix = async (req, res) => {
           }
         }
 
-        let matchedSession = null;
-        if (matchedBooking) {
-          matchedSession = sessions.find(
-            (s) =>
-              s.bookingId &&
-              s.bookingId._id?.toString() === matchedBooking._id.toString() &&
-              s.courtId &&
-              s.courtId.toString() === court._id.toString() &&
-              s.status !== 'CANCELLED'
-          );
+        let matchedSession = allCourtSessions.find((s) => {
+          if (!s.courtId) return false;
+          const sCourtId = (s.courtId._id || s.courtId).toString();
+          if (sCourtId !== court._id.toString()) return false;
+          if (s.status === 'CANCELLED') return false;
+
+          let sStartMin = 0;
+          let sEndMin = 0;
+          if (s.scheduledStartTime && s.scheduledEndTime) {
+            const startD = new Date(s.scheduledStartTime);
+            const endD = new Date(s.scheduledEndTime);
+            sStartMin = startD.getHours() * 60 + startD.getMinutes();
+            sEndMin = endD.getHours() * 60 + endD.getMinutes();
+          } else if (s.bookingId?.startTime && s.bookingId?.endTime) {
+            const [sh, sm] = s.bookingId.startTime.split(':').map(Number);
+            const [eh, em] = s.bookingId.endTime.split(':').map(Number);
+            sStartMin = sh * 60 + sm;
+            sEndMin = eh * 60 + em;
+          }
+          if (sEndMin <= sStartMin) sEndMin = sStartMin + 60;
+          const overlap = Math.min(sEndMin, slotEndTotalMin) - Math.max(sStartMin, slotStartTotalMin);
+          return overlap >= Math.min(stepMin, 15);
+        });
+
+        if (matchedSession && !matchedBooking && matchedSession.bookingId) {
+          matchedBooking = matchedSession.bookingId;
         }
 
-        if (!matchedSession) {
-          const liveCourtSession = activeLiveSessions.find((s) => {
-            if (!s.courtId || s.courtId.toString() !== court._id.toString()) return false;
-            let sStartMin = 0;
-            let sEndMin = 0;
-            if (s.scheduledStartTime && s.scheduledEndTime) {
-              const startD = new Date(s.scheduledStartTime);
-              const endD = new Date(s.scheduledEndTime);
-              sStartMin = startD.getHours() * 60 + startD.getMinutes();
-              sEndMin = endD.getHours() * 60 + endD.getMinutes();
-            } else if (s.bookingId?.startTime && s.bookingId?.endTime) {
-              const [sh, sm] = s.bookingId.startTime.split(':').map(Number);
-              const [eh, em] = s.bookingId.endTime.split(':').map(Number);
-              sStartMin = sh * 60 + sm;
-              sEndMin = eh * 60 + em;
-            }
-            if (sEndMin <= sStartMin) sEndMin = sStartMin + 60;
-            const overlap = Math.min(sEndMin, slotEndTotalMin) - Math.max(sStartMin, slotStartTotalMin);
-            return overlap >= Math.min(stepMin, 15);
-          });
-
-          if (liveCourtSession) {
-            if (!matchedBooking || (liveCourtSession.bookingId && liveCourtSession.bookingId._id?.toString() === matchedBooking._id?.toString())) {
-              matchedSession = liveCourtSession;
-              if (!matchedBooking && liveCourtSession.bookingId) {
-                matchedBooking = liveCourtSession.bookingId;
-              }
-            }
+        if (matchedBooking && !matchedSession) {
+          const movedSession = allCourtSessions.find(
+            (s) => s.bookingId && s.bookingId._id?.toString() === matchedBooking._id.toString() && (s.courtId?._id || s.courtId)?.toString() !== court._id.toString()
+          );
+          if (movedSession && (!matchedBooking.items || matchedBooking.items.length <= 1)) {
+            matchedBooking = null;
+            matchedSlot = null;
           }
         }
 
@@ -1232,8 +1247,36 @@ exports.getCourtMatrix = async (req, res) => {
           } else {
             cellStatus = 'CONFIRMED';
             if (isCurrentDate && currentMinutesOfDay > slotStartTotalMin) {
-              isLate = true;
               lateMinutes = currentMinutesOfDay - slotStartTotalMin;
+              if (lateMinutes > 15) {
+                // Khách đến trễ quá 15 phút -> Tự động hủy đơn và giải phóng sân thành AVAILABLE
+                isLate = false;
+                cellStatus = 'AVAILABLE';
+                const bookingToCancelId = matchedBooking?._id || matchedSlot?._id;
+                if (bookingToCancelId) {
+                  Booking.updateOne(
+                    { _id: bookingToCancelId, status: 'CONFIRMED' },
+                    {
+                      $set: {
+                        status: 'CANCELLED',
+                        cancellationReason: 'Tự động hủy do khách đến trễ quá 15 phút so với giờ bắt đầu'
+                      },
+                      $push: {
+                        cancellationHistory: {
+                          cancelledAt: now,
+                          cancelledByRole: 'STAFF',
+                          previousStatus: 'CONFIRMED',
+                          scope: 'BOOKING'
+                        }
+                      }
+                    }
+                  ).catch((err) => console.error('[getCourtMatrix auto-cancel error]:', err.message));
+                }
+                matchedSlot = null;
+                matchedBooking = null;
+              } else {
+                isLate = true;
+              }
             }
           }
         }
@@ -1279,14 +1322,44 @@ exports.getCourtMatrix = async (req, res) => {
                 isWalkIn,
                 note: matchedSlot.note
               }
-            : null,
+            : (matchedBooking
+                ? {
+                    _id: matchedBooking._id,
+                    bookingCode: matchedBooking.bookingCode,
+                    status: cellStatus,
+                    bookingStatus: matchedBooking.status,
+                    paymentStatus: matchedBooking.paymentStatus,
+                    totalAmount: matchedBooking.totalAmount,
+                    startTime: matchedBooking.startTime,
+                    endTime: matchedBooking.endTime,
+                    itemId: null,
+                    courtId: court._id,
+                    customer: {
+                      fullName: displayCustomerName,
+                      phone: displayCustomerPhone,
+                      email: matchedBooking?.customerId?.email || ''
+                    },
+                    customerDisplayName: displayCustomerName,
+                    customerDisplayPhone: displayCustomerPhone,
+                    isWalkIn,
+                    note: matchedBooking.note
+                  }
+                : null),
           session: matchedSession
             ? {
                 _id: matchedSession._id,
-                courtId: matchedSession.courtId,
+                courtId: {
+                  _id: court._id,
+                  name: court.name,
+                  courtType: court.courtType
+                },
+                courtName: court.name,
                 bookingId: matchedSession.bookingId?._id || matchedSession.bookingId,
                 sessionCode: matchedSession.sessionCode,
                 status: matchedSession.status,
+                baseCourtFee: matchedSession.baseCourtFee || 0,
+                earlyCheckInFee: matchedSession.earlyCheckInFee || 0,
+                extensions: matchedSession.extensions || [],
                 scheduledStartTime: matchedSession.scheduledStartTime,
                 scheduledEndTime: matchedSession.scheduledEndTime,
                 isNearEnd: matchedSession.isNearEnd,
