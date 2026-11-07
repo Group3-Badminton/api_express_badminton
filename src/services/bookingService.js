@@ -1542,6 +1542,20 @@ class BookingService {
           : `Yêu cầu đặt sân #${created.bookingCode} tại ${summaryList} ngày ${bookingDate} đang chờ nhân viên duyệt.`,
         isRead: false
       });
+
+      // Gửi thông báo cho Nhân viên & Quản trị viên (STAFF)
+      await Notification.create({
+        recipientType: 'STAFF',
+        type: 'BOOKING_NEW',
+        title: finalStatus === 'CONFIRMED'
+          ? `Đơn đặt sân mới #${created.bookingCode} đã xác nhận`
+          : `Có đơn đặt sân mới #${created.bookingCode} cần duyệt! 🏸`,
+        message: finalStatus === 'CONFIRMED'
+          ? `Khách hàng vừa đặt đơn #${created.bookingCode} tại ${summaryList} ngày ${bookingDate}.`
+          : `Khách hàng vừa gửi yêu cầu đặt sân #${created.bookingCode} tại ${summaryList} ngày ${bookingDate}. Vui lòng kiểm tra và duyệt giữ sân.`,
+        isRead: false,
+        status: 'ACTIVE'
+      });
     } catch (notifErr) {
       console.warn('Không thể tạo thông báo:', notifErr.message);
     }
@@ -1773,6 +1787,20 @@ class BookingService {
           ? `Đơn đặt sân #${committedBooking.bookingCode} đã được bạn hủy.`
           : `Bạn đã hủy một lịch sân trong đơn #${committedBooking.bookingCode}.`,
         isRead: false
+      });
+
+      // Gửi thông báo cho Nhân viên & Quản trị viên (STAFF)
+      await Notification.create({
+        recipientType: 'STAFF',
+        type: 'BOOKING_CANCELLED',
+        title: committedBooking.status === 'CANCELLED'
+          ? `Khách hàng vừa hủy đơn đặt sân #${committedBooking.bookingCode}!`
+          : `Khách hàng vừa hủy lịch sân trong đơn #${committedBooking.bookingCode}!`,
+        message: committedBooking.status === 'CANCELLED'
+          ? `Khách hàng đã hủy đơn đặt sân #${committedBooking.bookingCode}. Khung giờ tại các sân đã được giải phóng trở lại trạng thái trống.`
+          : `Khách hàng đã hủy một phần lịch sân trong đơn #${committedBooking.bookingCode}. Khung giờ tương ứng đã được giải phóng.`,
+        isRead: false,
+        status: 'ACTIVE'
       });
     } catch (notifErr) {
       console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
@@ -2015,6 +2043,20 @@ class BookingService {
           ? `Đơn đặt sân #${savedBooking.bookingCode} đã được bạn hủy.`
           : `Bạn đã hủy một lịch sân trong đơn #${savedBooking.bookingCode}.`,
         isRead: false
+      });
+
+      // Gửi thông báo cho Nhân viên & Quản trị viên (STAFF)
+      await Notification.create({
+        recipientType: 'STAFF',
+        type: 'BOOKING_CANCELLED',
+        title: savedBooking.status === 'CANCELLED'
+          ? `Khách hàng vừa hủy đơn đặt sân #${savedBooking.bookingCode}!`
+          : `Khách hàng vừa hủy lịch sân trong đơn #${savedBooking.bookingCode}!`,
+        message: savedBooking.status === 'CANCELLED'
+          ? `Khách hàng đã hủy đơn đặt sân #${savedBooking.bookingCode}. Khung giờ tại các sân đã được giải phóng trở lại trạng thái trống.`
+          : `Khách hàng đã hủy một phần lịch sân trong đơn #${savedBooking.bookingCode}. Khung giờ tương ứng đã được giải phóng.`,
+        isRead: false,
+        status: 'ACTIVE'
       });
     } catch (notifErr) {
       console.warn('Không thể gửi thông báo cập nhật:', notifErr.message);
@@ -2938,6 +2980,22 @@ class BookingService {
           title: 'Thông tin đơn đặt sân đã thay đổi',
           message: `Đơn đặt sân #${savedBooking.bookingCode} đã được cập nhật: ${scheduleSummary}. Tổng tiền: ${savedBooking.totalAmount.toLocaleString('vi-VN')}đ. Trạng thái đơn vẫn là ${savedBooking.status}.`,
           isRead: false
+        });
+      } catch (notifErr) {
+        notificationSent = false;
+      }
+    } else if (isCustomer) {
+      try {
+        const scheduleSummary = savedBooking.items.map((item) =>
+          `${item.courtName} ngày ${new Date(item.bookingDate || savedBooking.bookingDate).toLocaleDateString('vi-VN')} (${item.startTime}-${item.endTime})`
+        ).join('; ');
+        await Notification.create({
+          recipientType: 'STAFF',
+          type: 'BOOKING_UPDATED',
+          title: `Khách hàng vừa cập nhật đơn đặt sân #${savedBooking.bookingCode}`,
+          message: `Khách hàng đã thay đổi lịch đặt sân đơn #${savedBooking.bookingCode}: ${scheduleSummary}. Tổng tiền: ${savedBooking.totalAmount.toLocaleString('vi-VN')}đ.`,
+          isRead: false,
+          status: 'ACTIVE'
         });
       } catch (notifErr) {
         notificationSent = false;
