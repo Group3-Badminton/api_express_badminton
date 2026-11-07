@@ -1,10 +1,18 @@
-const User = require('../models/user');
+const Staff = require('../models/staff');
+const Customer = require('../models/customer');
 const mongoose = require('mongoose');
 const { sendSuccess, sendError } = require('../utils/response');
 
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password -resetOtp -resetOtpExpiry');
+    const userId = req.user._id || req.user.userId;
+    let user = null;
+    if (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF') {
+      user = await Staff.findById(userId).select('-password -resetOtp -resetOtpExpiry');
+    } else {
+      user = await Customer.findById(userId).select('-password -resetOtp -resetOtpExpiry');
+    }
+
     if (!user) {
       return sendError(res, 'Không tìm thấy thông tin người dùng!', 404);
     }
@@ -14,52 +22,60 @@ exports.getProfile = async (req, res) => {
   }
 };
 
-// 2. Cập nhật Họ tên và Số điện thoại
+// 2. Cập nhật Họ tên và Email (UC-05: SĐT là định danh duy nhất - chỉ đọc)
 exports.updateProfile = async (req, res) => {
   try {
-    const { fullName, phone } = req.body;
-    const userId = req.user.userId;
+    const { fullName, email, address } = req.body;
+    const userId = req.user._id || req.user.userId;
 
     if (!fullName || !fullName.trim()) {
-      return sendError(res, 'Họ và tên không được để trống!', 400);
+      return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
     }
 
-    const cleanPhone = (phone || '').trim();
-    if (cleanPhone) {
-      const phoneRegex = /(0[3|5|7|8|9])+([0-9]{8})\b/;
-      if (!phoneRegex.test(cleanPhone)) {
-        return sendError(res, 'Số điện thoại không hợp lệ (phải gồm 10 chữ số)!', 400);
-      }
-
-      // Kiểm tra xem số điện thoại có bị trùng với tài khoản khác không
-      const existingPhone = await User.findOne({
-        phone: cleanPhone,
-        _id: { $ne: userId }
-      });
-
-      if (existingPhone) {
-        return sendError(res, 'Số điện thoại này đã được sử dụng bởi tài khoản khác!', 400);
-      }
+    const updateData = {
+      fullName: fullName.trim()
+    };
+    if (address !== undefined) {
+      updateData.address = address;
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      {
-        fullName: fullName.trim(),
-        phone: cleanPhone
-      },
-      { new: true }
-    ).select('-password -resetOtp -resetOtpExpiry');
+    if (email !== undefined) {
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail) {
+        return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
+      }
 
-    return sendSuccess(res, updatedUser, 'Cập nhật thông tin cá nhân thành công!', 200);
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return sendError(res, 'Địa chỉ email không đúng định dạng. Vui lòng nhập lại.', 400);
+      }
+
+      // Kiểm tra trùng email cả bên Staff lẫn Customer
+      const staffEmail = await Staff.findOne({ email: cleanEmail, _id: { $ne: userId } });
+      const custEmail = await Customer.findOne({ email: cleanEmail, _id: { $ne: userId } });
+      if (staffEmail || custEmail) {
+        return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 400);
+      }
+
+      updateData.email = cleanEmail;
+    }
+
+    let updatedUser = null;
+    if (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF') {
+      updatedUser = await Staff.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');
+    } else {
+      updatedUser = await Customer.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');
+    }
+
+    return sendSuccess(res, updatedUser, 'Thông tin hồ sơ của bạn đã được cập nhật thành công.', 200);
   } catch (error) {
-    return sendError(res, error.message, 500);
+    return sendError(res, 'Không thể cập nhật hồ sơ vào lúc này. Vui lòng thử lại sau.', 500);
   }
 };
 
 exports.getCustomers = async (req, res) => {
   try {
-    const customers = await User.find({ role: 'CUSTOMER' })
+    const customers = await Customer.find({})
       .select('_id fullName email phone status lockReason lockedAt lockedByBookingId bookingCancellationHistory accountLockHistory createdAt updatedAt')
       .sort({ createdAt: -1 })
       .lean();
@@ -75,8 +91,8 @@ exports.unlockCustomer = async (req, res) => {
       return sendError(res, 'Không tìm thấy tài khoản khách hàng!', 404);
     }
     const unlockedAt = new Date();
-    const customer = await User.findOneAndUpdate(
-      { _id: req.params.id, role: 'CUSTOMER', status: 'LOCKED' },
+    const customer = await Customer.findOneAndUpdate(
+      { _id: req.params.id, status: 'LOCKED' },
       {
         $set: {
           status: 'ACTIVE',
@@ -89,7 +105,7 @@ exports.unlockCustomer = async (req, res) => {
             action: 'UNLOCKED',
             reason: 'Admin mở khóa tài khoản.',
             occurredAt: unlockedAt,
-            performedBy: req.user.userId
+            performedBy: req.user._id || req.user.userId
           }
         }
       },

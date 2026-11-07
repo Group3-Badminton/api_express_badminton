@@ -1,5 +1,29 @@
 const bookingService = require('../services/bookingService');
 const { sendSuccess, sendError } = require('../utils/response');
+// CLEAN CODE: Đơn giản hóa việc xác định thông báo cập nhật trạng thái đơn đặt sân
+const getBookingStatusUpdateMessage = (result, userRole) => {
+  const cancellationResult = result?.cancellationResult;
+  if (!cancellationResult) {
+    return 'Cập nhật trạng thái đặt sân thành công!';
+  }
+
+  if (cancellationResult.accountLocked) {
+    return cancellationResult.lockReason;
+  }
+
+  if (cancellationResult.scope === 'ITEMS') {
+    return 'Hủy các lịch sân đã chọn thành công!';
+  }
+
+  if (userRole === 'CUSTOMER') {
+    if (cancellationResult.scope === 'ITEM' && result.status !== 'CANCELLED') {
+      return 'Hủy lịch sân trong đơn thành công!';
+    }
+    return 'Hủy đơn đặt sân thành công!';
+  }
+
+  return 'Hủy đơn đặt sân thành công!';
+};
 
 class BookingController {
   constructor() {
@@ -115,17 +139,7 @@ class BookingController {
   async updateBookingStatus(req, res) {
     try {
       const result = await bookingService.updateBookingStatus(req.params.id, req.body, req.user);
-      const message = result.cancellationResult?.accountLocked
-        ? result.cancellationResult.lockReason
-        : result.cancellationResult?.scope === 'ITEMS'
-          ? 'Hủy các lịch sân đã chọn thành công!'
-        : result.cancellationResult?.scope === 'BOOKING' && req.user?.role !== 'CUSTOMER'
-          ? 'Hủy đơn đặt sân thành công!'
-        : req.user?.role === 'CUSTOMER'
-          ? (result.cancellationResult?.scope === 'ITEM' && result.status !== 'CANCELLED'
-            ? 'Hủy lịch sân trong đơn thành công!'
-            : 'Hủy đơn đặt sân thành công!')
-          : 'Cập nhật trạng thái đặt sân thành công!';
+      const message = getBookingStatusUpdateMessage(result, req.user?.role); // CLEAN CODE
       return sendSuccess(res, result, message, 200);
     } catch (error) {
       return sendError(res, error.message, error.statusCode || 500);

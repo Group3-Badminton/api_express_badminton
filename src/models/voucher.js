@@ -72,7 +72,7 @@ const voucherSchema = new mongoose.Schema(
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+      ref: 'Staff'
     }
   },
   {
@@ -83,5 +83,21 @@ const voucherSchema = new mongoose.Schema(
 voucherSchema.index({ status: 1 });
 voucherSchema.index({ startDate: 1, endDate: 1 });
 voucherSchema.index({ createdAt: -1 });
+
+// CLEAN CODE: Hỗ trợ tương thích ngược cho voucherCode, voucherName và maxDiscount từ DB
+voucherSchema.virtual('voucherCode').get(function () {
+  return this.code;
+});
+
+voucherSchema.virtual('voucherName').get(function () {
+  return this.name;
+});
+
+voucherSchema.virtual('maxDiscount').get(function () {
+  return this.maxDiscountAmount;
+});
+
+voucherSchema.set('toJSON', { virtuals: true });
+voucherSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Voucher', voucherSchema, 'Voucher');

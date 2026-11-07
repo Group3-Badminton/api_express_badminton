@@ -1,6 +1,7 @@
 const schedule = require('node-schedule');
 const PlayingSession = require('../models/playingSession');
 const Court = require('../models/court');
+const Booking = require('../models/booking');
 const Notification = require('../models/notification');
 
 // Map lưu trữ các jobs cảnh báo theo sessionId để có thể hủy hoặc dời lịch khi gia hạn
@@ -137,9 +138,109 @@ async function restoreActiveSessionJobs() {
   }
 }
 
+async function autoCancelLateBookings() {
+  try {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const day = now.getDate();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const localStartOfDay = new Date(year, month, day, 0, 0, 0, 0);
+    const localEndOfDay = new Date(year, month, day, 23, 59, 59, 999);
+    const utcStartOfDay = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+    const utcEndOfDay = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+    const minToday = new Date(Math.min(localStartOfDay.getTime(), utcStartOfDay.getTime()));
+    const maxToday = new Date(Math.max(localEndOfDay.getTime(), utcEndOfDay.getTime()));
+
+    // 1. Tự động hủy tất cả đơn CONFIRMED ở ngày quá khứ
+    const pastBookings = await Booking.find({
+      status: 'CONFIRMED',
+      bookingDate: { $lt: minToday }
+    });
+
+    for (const b of pastBookings) {
+      try {
+        const updateDoc = {
+          $set: {
+            status: 'CANCELLED',
+            cancellationReason: 'Tự động hủy do quá hạn ngày nhận sân'
+          },
+          $push: {
+            cancellationHistory: {
+              cancelledAt: now,
+              cancelledByRole: 'STAFF',
+              previousStatus: 'CONFIRMED',
+              scope: 'BOOKING'
+            }
+          }
+        };
+        if (Array.isArray(b.items) && b.items.length > 0) {
+          updateDoc.$set['items.$[].status'] = 'CANCELLED';
+        }
+        await Booking.updateOne({ _id: b._id }, updateDoc);
+        console.log(`[AUTO-CANCEL] Đã hủy đơn quá hạn ngày #${b.bookingCode}`);
+      } catch (err) {
+        console.error(`[AUTO-CANCEL ERROR] Lỗi hủy đơn quá hạn #${b.bookingCode}:`, err.message);
+      }
+    }
+
+    // 2. Tự động hủy đơn trong ngày hôm nay nếu đến trễ quá 15 phút
+    const todayBookings = await Booking.find({
+      status: 'CONFIRMED',
+      bookingDate: { $gte: minToday, $lte: maxToday }
+    });
+
+    for (const b of todayBookings) {
+      try {
+        let effectiveStartTime = b.startTime;
+        if (!effectiveStartTime && Array.isArray(b.items) && b.items.length > 0) {
+          effectiveStartTime = b.items[0]?.startTime;
+        }
+
+        if (!effectiveStartTime || typeof effectiveStartTime !== 'string' || !effectiveStartTime.includes(':')) {
+          continue;
+        }
+
+        const [sh, sm] = effectiveStartTime.trim().split(':').map(Number);
+        const startMin = (sh || 0) * 60 + (sm || 0);
+
+        if (currentMinutes > startMin + 15) {
+          const updateDoc = {
+            $set: {
+              status: 'CANCELLED',
+              cancellationReason: 'Tự động hủy do khách đến trễ quá 15 phút so với giờ bắt đầu'
+            },
+            $push: {
+              cancellationHistory: {
+                cancelledAt: now,
+                cancelledByRole: 'STAFF',
+                previousStatus: 'CONFIRMED',
+                scope: 'BOOKING'
+              }
+            }
+          };
+          if (Array.isArray(b.items) && b.items.length > 0) {
+            updateDoc.$set['items.$[].status'] = 'CANCELLED';
+          }
+          await Booking.updateOne({ _id: b._id }, updateDoc);
+          console.log(`[AUTO-CANCEL] Đã tự động hủy đơn #${b.bookingCode} (Giờ hẹn: ${effectiveStartTime}, trễ ${currentMinutes - startMin} phút)`);
+        }
+      } catch (err) {
+        console.error(`[AUTO-CANCEL ERROR] Lỗi hủy đơn trễ #${b.bookingCode}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[AUTO-CANCEL ERROR]', err.message);
+  }
+}
+
+schedule.scheduleJob('*/1 * * * *', autoCancelLateBookings);
+
 module.exports = {
   scheduleSessionNearEndWarning,
   cancelSessionWarning,
   scheduleAutoCleanFinish,
-  restoreActiveSessionJobs
+  restoreActiveSessionJobs,
+  autoCancelLateBookings
 };
