@@ -4,8 +4,6 @@ const Staff = require('../models/staff');
 const Customer = require('../models/customer');
 const { sendSuccess, sendError } = require('../utils/response');
 
-const PHONE_REGEX = /^0[35789][0-9]{8}$/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const sanitizeStaff = (staff) => ({
   _id: staff._id,
@@ -120,13 +118,13 @@ exports.createStaff = async (req, res) => {
     }
 
     const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-    if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
-      errors.email = 'Email không hợp lệ!';
+    if (!cleanEmail) {
+      errors.email = 'Email không được để trống!';
     }
 
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
-    if (!cleanPhone || !PHONE_REGEX.test(cleanPhone)) {
-      errors.phone = 'Số điện thoại không hợp lệ (phải gồm 10 chữ số, bắt đầu bằng 03, 05, 07, 08, 09)!';
+    if (!cleanPhone) {
+      errors.phone = 'Số điện thoại không được để trống!';
     }
 
     const rawPassword = typeof password === 'string' ? password : '';
@@ -169,6 +167,13 @@ exports.createStaff = async (req, res) => {
 
     return sendSuccess(res, sanitizeStaff(newStaff), 'Tạo tài khoản nhân viên thành công!', 201);
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = {};
+      Object.keys(error.errors).forEach((key) => {
+        errors[key] = error.errors[key].message;
+      });
+      return sendError(res, 'Dữ liệu đầu vào không hợp lệ!', 400, errors);
+    }
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern || {})[0] || 'email';
       const errors = {};
@@ -204,13 +209,13 @@ exports.updateStaff = async (req, res) => {
     }
 
     const cleanEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-    if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
-      errors.email = 'Email không hợp lệ!';
+    if (!cleanEmail) {
+      errors.email = 'Email không được để trống!';
     }
 
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
-    if (!cleanPhone || !PHONE_REGEX.test(cleanPhone)) {
-      errors.phone = 'Số điện thoại không hợp lệ (phải gồm 10 chữ số, bắt đầu bằng 03, 05, 07, 08, 09)!';
+    if (!cleanPhone) {
+      errors.phone = 'Số điện thoại không được để trống!';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -241,6 +246,13 @@ exports.updateStaff = async (req, res) => {
 
     return sendSuccess(res, sanitizeStaff(targetStaff), 'Cập nhật thông tin nhân viên thành công!', 200);
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const errors = {};
+      Object.keys(error.errors).forEach((key) => {
+        errors[key] = error.errors[key].message;
+      });
+      return sendError(res, 'Dữ liệu đầu vào không hợp lệ!', 400, errors);
+    }
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern || {})[0] || 'email';
       const errors = {};

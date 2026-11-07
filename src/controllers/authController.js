@@ -4,6 +4,82 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendSuccess, sendError } = require('../utils/response');
 
+exports.register = async (req, res) => {
+  try {
+    const { fullName, email, phone, password } = req.body;
+    if (!fullName || !email || !phone || !password) {
+      return sendError(res, 'Vui lòng nhập đầy đủ Họ tên, Email, Số điện thoại và Mật khẩu!', 400);
+    }
+    if (password.length < 6) {
+      return sendError(res, 'Mật khẩu phải có tối thiểu 6 ký tự!', 400);
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.trim();
+
+    // check email có trùng giữa customer và staff hong
+    const staffEmailExists = await Staff.findOne({ email: cleanEmail });
+    if (staffEmailExists) {
+      return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
+    }
+
+    const existingCustomer = await Customer.findOne({ email: cleanEmail });
+    if (existingCustomer && existingCustomer.status !== 'PENDING_VERIFICATION') {
+      return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
+    }
+    //check so dien thoai
+    const staffPhoneExists = await Staff.findOne({ phone: cleanPhone });
+    if (staffPhoneExists) {
+      return sendError(res, 'Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng số khác.', 400);
+    }
+    const existingPhone = await Customer.findOne({ phone: cleanPhone });
+    if (existingPhone && existingPhone.status !== 'PENDING_VERIFICATION') {
+      return sendError(res, 'Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng số khác.', 400);
+    }
+
+    const targetAccount = existingCustomer || existingPhone;
+
+    // Cơ chế sinh OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    if (targetAccount) {
+      targetAccount.fullName = fullName.trim();
+      targetAccount.email = cleanEmail;
+      targetAccount.phone = cleanPhone;
+      targetAccount.password = hashedPassword;
+      targetAccount.resetOtp = otp;
+      targetAccount.resetOtpExpiry = otpExpiry;
+      targetAccount.status = 'PENDING_VERIFICATION';
+      await targetAccount.save();
+    } else {
+      await Customer.create({
+        fullName: fullName.trim(),
+        email: cleanEmail,
+        phone: cleanPhone,
+        password: hashedPassword,
+        role: 'CUSTOMER',
+        status: 'PENDING_VERIFICATION',
+        resetOtp: otp,
+        resetOtpExpiry: otpExpiry
+      });
+    }
+
+    const userData = {
+      email: cleanEmail,
+      fullName: fullName.trim(),
+      otp: otp,
+      otpExpiry: otpExpiry
+    };
+    return sendSuccess(res, userData, 'Đã tạo tài khoản, vui lòng nhập mã OTP gửi về email để kích hoạt!', 200);
+  } catch (error) {
+    if (error.name === 'ValidationError') {
+      const message = Object.values(error.errors).map((e) => e.message).join(', ');
+      return sendError(res, message, 400);
+    }
+    return sendError(res, error.message, 500);
+  }
+};
 exports.login = async (req, res) => {
   try {
     const { account, password } = req.body;
@@ -76,78 +152,7 @@ exports.login = async (req, res) => {
   }
 };
 
-exports.register = async (req, res) => {
-  try {
-    const { fullName, email, phone, password } = req.body;
-    if (!fullName || !email || !phone || !password) {
-      return sendError(res, 'Vui lòng nhập đầy đủ Họ tên, Email, Số điện thoại và Mật khẩu!', 400);
-    }
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = phone.trim();
-    const phoneRegex = /(0[3|5|7|8|9])+([0-9]{8})\b/;
-    if (!phoneRegex.test(cleanPhone)) {
-      return sendError(res, 'Số điện thoại không hợp lệ! Vui lòng nhập đúng số điện thoại (10 chữ số).', 400);
-    }
 
-    // 1. Kiểm tra Email xem có bị trùng trong Staff hoặc Customer không
-    const staffEmailExists = await Staff.findOne({ email: cleanEmail });
-    if (staffEmailExists) {
-      return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
-    }
-
-    const existingCustomer = await Customer.findOne({ email: cleanEmail });
-    if (existingCustomer && existingCustomer.status !== 'PENDING_VERIFICATION') {
-      return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
-    }
-
-    // 2. Kiểm tra Số điện thoại
-    const staffPhoneExists = await Staff.findOne({ phone: cleanPhone });
-    if (staffPhoneExists) {
-      return sendError(res, 'Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng số khác.', 400);
-    }
-
-    const existingPhone = await Customer.findOne({ phone: cleanPhone, email: { $ne: cleanEmail } });
-    if (existingPhone && existingPhone.status !== 'PENDING_VERIFICATION') {
-      return sendError(res, 'Số điện thoại này đã được đăng ký. Vui lòng đăng nhập hoặc sử dụng số khác.', 400);
-    }
-
-    // 3. Sinh mã OTP và mã hóa mật khẩu
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // 4. Cập nhật nếu đang ở PENDING_VERIFICATION hoặc tạo mới
-    if (existingCustomer) {
-      existingCustomer.fullName = fullName.trim();
-      existingCustomer.phone = cleanPhone;
-      existingCustomer.password = hashedPassword;
-      existingCustomer.resetOtp = otp;
-      existingCustomer.resetOtpExpiry = otpExpiry;
-      existingCustomer.status = 'PENDING_VERIFICATION';
-      await existingCustomer.save();
-    } else {
-      await Customer.create({
-        fullName: fullName.trim(),
-        email: cleanEmail,
-        phone: cleanPhone,
-        password: hashedPassword,
-        role: 'CUSTOMER',
-        status: 'PENDING_VERIFICATION',
-        resetOtp: otp,
-        resetOtpExpiry: otpExpiry
-      });
-    }
-
-    const userData = {
-      email: cleanEmail,
-      fullName: fullName.trim(),
-      otp: otp
-    };
-    return sendSuccess(res, userData, 'Đã tạo tài khoản, vui lòng nhập mã OTP gửi về email để kích hoạt!', 200);
-  } catch (error) {
-    return sendError(res, error.message, 500);
-  }
-};
 
 exports.sendOtp = async (req, res) => {
   try {
@@ -156,9 +161,7 @@ exports.sendOtp = async (req, res) => {
       return sendError(res, 'Vui lòng nhập địa chỉ Email!', 400);
     }
     const cleanEmail = email.trim().toLowerCase();
-
-    // Tìm trong Staff hoặc Customer
-    let user = await Staff.findOne({ email: cleanEmail });
+    const user = await Staff.findOne({ email: cleanEmail });
     if (!user) {
       user = await Customer.findOne({ email: cleanEmail });
     }
@@ -180,7 +183,8 @@ exports.sendOtp = async (req, res) => {
     const userData = {
       email: user.email,
       fullName: user.fullName,
-      otp: otp
+      otp: otp,
+      otpExpiry: otpExpiry
     };
     return sendSuccess(res, userData, 'Đã tạo mã OTP thành công!', 200);
   } catch (error) {
@@ -197,7 +201,7 @@ exports.verifyOtp = async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanOtp = otp.trim();
 
-    let user = await Staff.findOne({ email: cleanEmail, resetOtp: cleanOtp });
+    const user = await Staff.findOne({ email: cleanEmail, resetOtp: cleanOtp });
     if (!user) {
       user = await Customer.findOne({ email: cleanEmail, resetOtp: cleanOtp });
     }
@@ -236,7 +240,7 @@ exports.resetPassword = async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanOtp = otp.trim();
 
-    let user = await Staff.findOne({ email: cleanEmail, resetOtp: cleanOtp });
+    const user = await Staff.findOne({ email: cleanEmail, resetOtp: cleanOtp });
     if (!user) {
       user = await Customer.findOne({ email: cleanEmail, resetOtp: cleanOtp });
     }

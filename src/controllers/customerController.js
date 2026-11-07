@@ -3,8 +3,6 @@ const Customer = require('../models/customer');
 const Staff = require('../models/staff');
 const { sendSuccess, sendError } = require('../utils/response');
 
-const PHONE_REGEX = /(0[3|5|7|8|9])+([0-9]{8})\b/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const sanitizeCustomer = (customer) => ({
   _id: customer._id,
@@ -104,10 +102,6 @@ exports.createCustomer = async (req, res) => {
       return sendError(res, 'Họ và tên cùng Số điện thoại là bắt buộc.', 400);
     }
 
-    // E2: Kiểm tra định dạng số điện thoại VN (10 chữ số)
-    if (!PHONE_REGEX.test(cleanPhone)) {
-      return sendError(res, 'Số điện thoại không đúng định dạng hợp lệ (10 chữ số, đầu số 03, 05, 07, 08, 09)!', 400);
-    }
 
     // E3: Kiểm tra Số điện thoại đã được đăng ký chưa (BR-04)
     const existingPhoneInCust = await Customer.findOne({ phone: cleanPhone });
@@ -120,9 +114,6 @@ exports.createCustomer = async (req, res) => {
     let cleanEmail = undefined;
     if (email && typeof email === 'string' && email.trim()) {
       cleanEmail = email.trim().toLowerCase();
-      if (!EMAIL_REGEX.test(cleanEmail)) {
-        return sendError(res, 'Định dạng Email không hợp lệ!', 400);
-      }
       const existingEmailInCust = await Customer.findOne({ email: cleanEmail });
       const existingEmailInStaff = await Staff.findOne({ email: cleanEmail });
       if (existingEmailInCust || existingEmailInStaff) {
@@ -143,6 +134,10 @@ exports.createCustomer = async (req, res) => {
 
     return sendSuccess(res, sanitizeCustomer(newCustomer), 'Khách hàng đã được tạo thành công.', 201);
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const message = Object.values(error.errors).map(e => e.message).join(', ');
+      return sendError(res, message, 400);
+    }
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email đã tồn tại!', 409);
     }
@@ -176,9 +171,6 @@ exports.updateCustomer = async (req, res) => {
       return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
     }
 
-    if (!PHONE_REGEX.test(cleanPhone)) {
-      return sendError(res, 'Số điện thoại không đúng định dạng hợp lệ (10 chữ số)!', 400);
-    }
 
     // Kiểm tra trùng SĐT nếu có thay đổi
     if (cleanPhone !== customer.phone) {
@@ -194,9 +186,6 @@ exports.updateCustomer = async (req, res) => {
     if (email !== undefined) {
       const emailInput = typeof email === 'string' ? email.trim().toLowerCase() : '';
       if (emailInput) {
-        if (!EMAIL_REGEX.test(emailInput)) {
-          return sendError(res, 'Định dạng Email không hợp lệ!', 400);
-        }
         const existingEmailCust = await Customer.findOne({ email: emailInput, _id: { $ne: id } });
         const existingEmailStaff = await Staff.findOne({ email: emailInput });
         if (existingEmailCust || existingEmailStaff) {
@@ -219,6 +208,10 @@ exports.updateCustomer = async (req, res) => {
 
     return sendSuccess(res, sanitizeCustomer(customer), 'Thông tin khách hàng đã được cập nhật thành công.', 200);
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const message = Object.values(error.errors).map(e => e.message).join(', ');
+      return sendError(res, message, 400);
+    }
     if (error.code === 11000) {
       return sendError(res, 'Thông tin Số điện thoại hoặc Email bị trùng lặp!', 409);
     }

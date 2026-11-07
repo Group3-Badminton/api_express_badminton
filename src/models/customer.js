@@ -10,16 +10,17 @@ const customerSchema = new mongoose.Schema({
     type: String,
     required: false,
     trim: true,
-    lowercase: true
+    lowercase: true,
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Định dạng Email không hợp lệ!']
   },
   password: {
     type: String,
-    required: true
+    required: true,
   },
   phone: {
     type: String,
-    default: '',
-    trim: true
+    trim: true,
+    match: [/^0[35789]\d{8}$/, 'Số điện thoại không đúng định dạng hợp lệ (10 chữ số, đầu số 03, 05, 07, 08, 09)!']
   },
   address: {
     type: String,

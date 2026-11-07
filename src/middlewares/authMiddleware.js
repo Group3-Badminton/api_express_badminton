@@ -12,7 +12,7 @@ const authenticateUser = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'badminton_secret_key_2026');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'badminton_2');
     const userId = decoded.userId || decoded.id;
 
     // Tìm trong Staff trước hoặc Customer
