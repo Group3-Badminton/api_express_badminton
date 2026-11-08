@@ -115,7 +115,7 @@ const getBookingStartDate = (bookingDate, time) => {
   const [hours, minutes] = time.split(":").map(Number);
   return new Date(
     Date.UTC(part("year"), part("month") - 1, part("day"), hours, minutes) -
-      BUSINESS_TIME_ZONE_OFFSET_MS,
+    BUSINESS_TIME_ZONE_OFFSET_MS,
   );
 };
 
@@ -154,10 +154,10 @@ const getBookingTotalsForActiveItems = (booking, cancelledItemIds = []) => {
   const cancelledItems = new Set(cancelledItemIds.map(String));
   const activeItems = Array.isArray(booking.items)
     ? booking.items.filter(
-        (item) =>
-          item.status !== "CANCELLED" &&
-          !cancelledItems.has(item._id.toString()),
-      )
+      (item) =>
+        item.status !== "CANCELLED" &&
+        !cancelledItems.has(item._id.toString()),
+    )
     : [];
   const price = activeItems.reduce(
     (sum, item) => sum + (Number(item.price) || 0),
@@ -495,9 +495,9 @@ class BookingService {
         const orderCourtId = order.courtId?._id || order.courtId;
         const overlaps = (other) =>
           String(other.courtId?._id || other.courtId) ===
-            String(orderCourtId) &&
+          String(orderCourtId) &&
           new Date(other.bookingDate || booking.bookingDate).getTime() ===
-            orderDate.getTime() &&
+          orderDate.getTime() &&
           other.startTime < order.endTime &&
           other.endTime > order.startTime &&
           other.status !== "CANCELLED";
@@ -810,7 +810,7 @@ class BookingService {
   async getCourtAvailability(courtId, bookingDate, currentUser = null) {
     if (!courtId || !bookingDate) {
       const err = new Error(
-        "Vui lòng cung cấp mã sân (courtId) và ngày đặt (bookingDate)!",
+        "Vui lòng cung cấp mã sân và ngày đặt!",
       );
       err.statusCode = 400;
       throw err;
@@ -1157,7 +1157,7 @@ class BookingService {
           !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(order.startTime || "") ||
           !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(order.endTime || "") ||
           parseTimeToMinutes(order.startTime) >=
-            parseTimeToMinutes(order.endTime),
+          parseTimeToMinutes(order.endTime),
       )
     ) {
       const err = new Error("Một hoặc nhiều sân hoặc khung giờ không hợp lệ.");
@@ -1178,7 +1178,7 @@ class BookingService {
       const dayOfWeek = orderDate.getDay();
       return dayOfWeek === 0 || dayOfWeek === 6 ? "WEEKEND" : "WEEKDAY";
     };
-    // CLEAN CODE: Đã loại bỏ biến chết priceDateConditions không sử dụng
+
 
     const [allPrices, allPriceRules, allTimeSlots] = await Promise.all([
       Price.find({
@@ -1325,13 +1325,13 @@ class BookingService {
         // Tìm TimeSlot tương ứng trong DB để lấy nhãn mô tả
         const matchedSlot =
           matchedPrice?.timeSlotId &&
-          typeof matchedPrice.timeSlotId === "object"
+            typeof matchedPrice.timeSlotId === "object"
             ? matchedPrice.timeSlotId
             : allTimeSlots.find((ts) => {
-                const sMin = parseTimeToMinutes(ts.startTime);
-                const eMin = parseTimeToMinutes(ts.endTime);
-                return sMin <= midPoint && eMin >= midPoint;
-              });
+              const sMin = parseTimeToMinutes(ts.startTime);
+              const eMin = parseTimeToMinutes(ts.endTime);
+              return sMin <= midPoint && eMin >= midPoint;
+            });
 
         let slotLabel = matchedSlot?.label || "";
         let slotLabelName = "";
@@ -1589,7 +1589,7 @@ class BookingService {
           if (existingUser.status !== "ACTIVE") {
             const err = new Error(
               existingUser.lockReason ||
-                "Tài khoản liên kết với số điện thoại này đã bị khóa. Vui lòng liên hệ Admin.",
+              "Tài khoản liên kết với số điện thoại này đã bị khóa. Vui lòng liên hệ Admin.",
             );
             err.statusCode = 403;
             throw err;
@@ -1831,7 +1831,7 @@ class BookingService {
               paymentStatus:
                 (currentUser?.role === "ADMIN" ||
                   currentUser?.role === "STAFF") &&
-                bodyPaymentStatus === "PAID"
+                  bodyPaymentStatus === "PAID"
                   ? "PAID"
                   : "UNPAID",
               status: finalStatus,
@@ -2395,7 +2395,7 @@ class BookingService {
         if (!currentAccount || currentAccount.status !== "ACTIVE") {
           const err = new Error(
             currentAccount?.lockReason ||
-              "Tài khoản của bạn đã bị khóa hoặc không còn hoạt động. Vui lòng liên hệ Admin.",
+            "Tài khoản của bạn đã bị khóa hoặc không còn hoạt động. Vui lòng liên hệ Admin.",
           );
           err.statusCode = 403;
           throw err;
@@ -3057,7 +3057,7 @@ class BookingService {
     if (
       isCustomer &&
       booking.customerId.toString() !==
-        (currentUser.userId || currentUser._id).toString()
+      (currentUser.userId || currentUser._id).toString()
     ) {
       const err = new Error("Bạn không có quyền cập nhật đơn đặt sân này.");
       err.statusCode = 403;
@@ -3375,7 +3375,7 @@ class BookingService {
     if (
       isCustomer &&
       originalBooking.customerId.toString() !==
-        (currentUser.userId || currentUser._id).toString()
+      (currentUser.userId || currentUser._id).toString()
     ) {
       const err = new Error("Bạn không có quyền chỉnh sửa đơn đặt sân này.");
       err.statusCode = 403;
@@ -3421,8 +3421,8 @@ class BookingService {
         for (const [changeIndex, change] of changeData.courtOrders.entries()) {
           const previousIndex = change?.itemId
             ? previousOrders.findIndex(
-                (order) => order.itemId === String(change.itemId),
-              )
+              (order) => order.itemId === String(change.itemId),
+            )
             : Number.isInteger(change?.itemIndex)
               ? change.itemIndex
               : changeIndex < previousOrders.length
@@ -3479,8 +3479,8 @@ class BookingService {
         for (const change of changeData.courtOrders) {
           const itemIndex = change?.itemId
             ? targetOrders.findIndex(
-                (order) => order.itemId === String(change.itemId),
-              )
+              (order) => order.itemId === String(change.itemId),
+            )
             : Number.isInteger(change?.itemIndex)
               ? change.itemIndex
               : -1;
@@ -3616,7 +3616,7 @@ class BookingService {
       if (
         isCustomer &&
         booking.customerId.toString() !==
-          (currentUser.userId || currentUser._id).toString()
+        (currentUser.userId || currentUser._id).toString()
       ) {
         const err = new Error("Bạn không có quyền chỉnh sửa đơn đặt sân này.");
         err.statusCode = 403;
@@ -3660,7 +3660,7 @@ class BookingService {
           previous &&
           String(order.courtId) === String(previous.courtId) &&
           new Date(order.bookingDate).toDateString() ===
-            new Date(previous.bookingDate).toDateString() &&
+          new Date(previous.bookingDate).toDateString() &&
           order.startTime === previous.startTime &&
           order.endTime === previous.endTime;
         const existingIntervals = previous?.intervals || [];
