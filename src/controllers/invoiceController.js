@@ -2,13 +2,13 @@ const invoiceService = require('../services/invoiceService');
 const { sendSuccess, sendError } = require('../utils/response');
 
 /**
- * Controller Quản lý Hóa đơn & Thanh toán (UC-12: Payment Management)
+ * Controller Quản lý Hóa đơn & Thanh toán
  * Tầng Controller chịu trách nhiệm nhận request, validation sơ bộ và trả về HTTP response
  * Logic nghiệp vụ được chuyển giao cho invoiceService.
  */
 
 /**
- * UC-12.2: Lấy danh sách hóa đơn kèm phân trang, tìm kiếm, lọc và thống kê doanh thu
+ * Lấy danh sách hóa đơn kèm phân trang, tìm kiếm, lọc và thống kê doanh thu
  */
 exports.getInvoices = async (req, res) => {
   try {
@@ -20,7 +20,7 @@ exports.getInvoices = async (req, res) => {
 };
 
 /**
- * UC-12.3: Xem chi tiết hóa đơn theo ID
+ * Xem chi tiết hóa đơn theo ID
  */
 exports.getInvoiceById = async (req, res) => {
   try {
@@ -33,7 +33,7 @@ exports.getInvoiceById = async (req, res) => {
 };
 
 /**
- * UC-12.5: Kiểm tra và áp dụng thử Voucher cho hóa đơn
+ * Kiểm tra và áp dụng Voucher cho hóa đơn
  */
 exports.validateVoucherForInvoice = async (req, res) => {
   try {
@@ -50,7 +50,7 @@ exports.validateVoucherForInvoice = async (req, res) => {
 };
 
 /**
- * UC-12.1: Thanh toán & quyết toán hóa đơn ca chơi tại quầy
+ * Thanh toán và quyết toán hóa đơn ca chơi tại quầy
  */
 exports.settleSessionInvoice = async (req, res) => {
   try {
@@ -64,7 +64,7 @@ exports.settleSessionInvoice = async (req, res) => {
 };
 
 /**
- * UC-12.4: Thanh toán bán hàng POS trực tiếp tại quầy
+ * Thanh toán bán hàng POS trực tiếp tại quầy
  */
 exports.createPosPayment = async (req, res) => {
   try {
