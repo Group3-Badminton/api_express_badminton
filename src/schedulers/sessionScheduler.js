@@ -98,28 +98,7 @@ function cancelSessionWarning(sessionId) {
 }
 
 /**
- * 4. Tự động chuyển trạng thái sân từ CLEANING sang AVAILABLE sau 10 phút dọn dẹp
- */
-function scheduleAutoCleanFinish(courtId) {
-  if (!courtId) return;
-  const cleanFinishTime = new Date(Date.now() + 10 * 60 * 1000); // 10 phút sau
-  
-  schedule.scheduleJob(cleanFinishTime, async () => {
-    try {
-      const court = await Court.findById(courtId);
-      if (court && court.operationalStatus === 'CLEANING') {
-        court.operationalStatus = 'AVAILABLE';
-        await court.save();
-        console.log(`[SCHEDULE] Sân ${court.name} đã hoàn tất dọn dẹp, chuyển về trạng thái AVAILABLE.`);
-      }
-    } catch (err) {
-      console.error('[SCHEDULE ERROR] Lỗi tự động chuyển dọn dẹp sân:', err.message);
-    }
-  });
-}
-
-/**
- * 5. Khôi phục các job cảnh báo khi khởi động lại Server (Server Restart Recovery)
+ * 4. Khôi phục các job cảnh báo khi khởi động lại Server (Server Restart Recovery)
  */
 async function restoreActiveSessionJobs() {
   try {
@@ -240,7 +219,6 @@ schedule.scheduleJob('*/1 * * * *', autoCancelLateBookings);
 module.exports = {
   scheduleSessionNearEndWarning,
   cancelSessionWarning,
-  scheduleAutoCleanFinish,
   restoreActiveSessionJobs,
   autoCancelLateBookings
 };
