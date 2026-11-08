@@ -13,11 +13,7 @@ const sanitizeCustomer = (customer) => ({
   phone: customer.phone,
   role: customer.role || 'CUSTOMER',
   status: customer.status,
-  address: customer.address || '',
-  isOnlineAccount: !!customer.password,
   lockReason: customer.lockReason || '',
-  bookingCancellationHistory: customer.bookingCancellationHistory || [],
-  accountLockHistory: customer.accountLockHistory || [],
   createdAt: customer.createdAt,
   updatedAt: customer.updatedAt
 });
@@ -33,7 +29,7 @@ const escapeRegex = (string) => {
  */
 exports.getCustomers = async (req, res) => {
   try {
-    const { search, status } = req.query;
+    const { search, status, page, limit } = req.query;
     const query = {};
 
     // 1. Lọc theo trạng thái
@@ -53,8 +49,40 @@ exports.getCustomers = async (req, res) => {
       ];
     }
 
+    // 3. Phân trang Server-side (hỗ trợ page & limit)
+    if (page !== undefined || limit !== undefined) {
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
+      const skip = (pageNum - 1) * limitNum;
+
+      const [customers, total] = await Promise.all([
+        Customer.find(query)
+          .select('_id fullName email phone role status password lockReason createdAt updatedAt')
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum),
+        Customer.countDocuments(query)
+      ]);
+
+      return sendSuccess(
+        res,
+        {
+          items: customers.map(sanitizeCustomer),
+          pagination: {
+            total,
+            page: pageNum,
+            limit: limitNum,
+            totalPages: Math.ceil(total / limitNum)
+          }
+        },
+        'Lấy danh sách khách hàng thành công!',
+        200
+      );
+    }
+
+    // Trường hợp không truyền page/limit (tương thích ngược)
     const customers = await Customer.find(query)
-      .select('_id fullName email phone role status address password lockReason bookingCancellationHistory accountLockHistory createdAt updatedAt')
+      .select('_id fullName email phone role status password lockReason createdAt updatedAt')
       .sort({ createdAt: -1 });
 
     return sendSuccess(res, customers.map(sanitizeCustomer), 'Lấy danh sách khách hàng thành công!', 200);
@@ -74,7 +102,7 @@ exports.getCustomerById = async (req, res) => {
     }
 
     const customer = await Customer.findById(id)
-      .select('_id fullName email phone role status address password createdAt updatedAt');
+      .select('_id fullName email phone role status password createdAt updatedAt');
 
     if (!customer) {
       return sendError(res, 'Không tìm thấy thông tin khách hàng!', 404);
@@ -94,7 +122,7 @@ exports.getCustomerById = async (req, res) => {
  */
 exports.createCustomer = async (req, res) => {
   try {
-    const { fullName, phone, email, address } = req.body || {};
+    const { fullName, phone, email } = req.body || {};
 
     const cleanFullName = typeof fullName === 'string' ? fullName.trim() : '';
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
@@ -117,7 +145,7 @@ exports.createCustomer = async (req, res) => {
     }
 
     // Kiểm tra Email nếu có cung cấp
-    let cleanEmail = undefined;
+    let cleanEmail = null;
     if (email && typeof email === 'string' && email.trim()) {
       cleanEmail = email.trim().toLowerCase();
       if (!EMAIL_REGEX.test(cleanEmail)) {
@@ -129,14 +157,12 @@ exports.createCustomer = async (req, res) => {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
       }
     }
-
     // Tạo bản ghi khách hàng
     const newCustomer = await Customer.create({
       fullName: cleanFullName,
       phone: cleanPhone,
       email: cleanEmail,
-      address: typeof address === 'string' ? address.trim() : '',
-      password: 'WALK_IN_NO_PASSWORD',
+      password: null,
       role: 'CUSTOMER',
       status: 'ACTIVE'
     });
@@ -167,7 +193,7 @@ exports.updateCustomer = async (req, res) => {
       return sendError(res, 'Không tìm thấy thông tin khách hàng cần cập nhật!', 404);
     }
 
-    const { fullName, phone, email, address } = req.body || {};
+    const { fullName, phone, email } = req.body || {};
 
     const cleanFullName = typeof fullName === 'string' ? fullName.trim() : '';
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
@@ -190,7 +216,7 @@ exports.updateCustomer = async (req, res) => {
     }
 
     // Kiểm tra trùng Email nếu có cung cấp
-    let cleanEmail = customer.email;
+    let cleanEmail = customer.email || null;
     if (email !== undefined) {
       const emailInput = typeof email === 'string' ? email.trim().toLowerCase() : '';
       if (emailInput) {
@@ -204,16 +230,13 @@ exports.updateCustomer = async (req, res) => {
         }
         cleanEmail = emailInput;
       } else {
-        cleanEmail = undefined;
+        cleanEmail = null;
       }
     }
 
     customer.fullName = cleanFullName;
     customer.phone = cleanPhone;
     customer.email = cleanEmail;
-    if (address !== undefined) {
-      customer.address = typeof address === 'string' ? address.trim() : '';
-    }
 
     await customer.save();
 
