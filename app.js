@@ -4,7 +4,6 @@ var path = require('path');
 var cookieParser = require('cookie-parser');
 var logger = require('morgan');
 
-
 const cors = require('cors');
 require('dotenv').config();
 require('./src/config/db').connectDB();
@@ -25,6 +24,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.use("/api/auth", require('./src/routes/authRoutes'));
 app.use("/api/users", require('./src/routes/userRoutes'));
+app.use("/api/products", require('./src/routes/productRoutes'));
+app.use("/api/vouchers", require('./src/routes/voucherRoutes'));
+app.use("/api/staffs", require('./src/routes/staffRoutes'));
+app.use("/api/customers", require('./src/routes/customerRoutes'));
+app.use("/api/courts", require('./src/routes/courtRoutes'));
+app.use("/api/pricing", require('./src/routes/pricingRoutes'));
+app.use("/api/prices", require('./src/routes/pricingRoutes'));
+app.use("/api/bookings", require('./src/routes/bookingRoutes'));
+app.use("/api/sessions", require('./src/routes/sessionRoutes'));
+app.use("/api/invoices", require('./src/routes/invoiceRoutes'));
+app.use("/api/notifications", require('./src/routes/notificationRoutes'));
+
+// Khôi phục các job cảnh báo sắp hết giờ & kích hoạt hủy tự động đơn trễ khi server khởi động
+const { restoreActiveSessionJobs, autoCancelLateBookings } = require('./src/schedulers/sessionScheduler');
+setTimeout(() => {
+  restoreActiveSessionJobs().catch(() => {});
+  autoCancelLateBookings().catch(() => {});
+}, 3000);
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
   next(createError(404));
