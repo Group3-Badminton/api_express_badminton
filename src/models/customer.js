@@ -14,7 +14,8 @@ const customerSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: true
+    required: false,
+    default: null
   },
   phone: {
     type: String,
@@ -136,7 +137,14 @@ customerSchema.index(
   { email: 1 },
   {
     unique: true,
-    partialFilterExpression: { email: { $type: 'string' } }
+    partialFilterExpression: { email: { $type: 'string', $gt: '' } }
+  }
+);
+customerSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { phone: { $type: 'string', $gt: '' } }
   }
 );
 

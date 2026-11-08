@@ -22,46 +22,75 @@ exports.getProfile = async (req, res) => {
   }
 };
 
-// 2. Cập nhật Họ tên và Email (UC-05: SĐT là định danh duy nhất - chỉ đọc)
+// 2. Cập nhật Họ tên, Email và Số điện thoại (UC-05 Profile)
 exports.updateProfile = async (req, res) => {
   try {
-    const { fullName, email, address } = req.body;
+    const { fullName, email, phone } = req.body;
     const userId = req.user._id || req.user.userId;
+    const isStaff = (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF');
 
     if (!fullName || !fullName.trim()) {
-      return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
+      return sendError(res, 'Vui lòng điền đầy đủ họ và tên.', 400);
     }
 
     const updateData = {
       fullName: fullName.trim()
     };
-    if (address !== undefined) {
-      updateData.address = address;
-    }
 
+    // 1. Kiểm tra Email mới
     if (email !== undefined) {
       const cleanEmail = (email || '').trim().toLowerCase();
       if (!cleanEmail) {
-        return sendError(res, 'Vui lòng điền đầy đủ tất cả các trường bắt buộc.', 400);
+        return sendError(res, 'Vui lòng nhập địa chỉ email hợp lệ.', 400);
       }
-
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(cleanEmail)) {
         return sendError(res, 'Địa chỉ email không đúng định dạng. Vui lòng nhập lại.', 400);
       }
 
-      // Kiểm tra trùng email cả bên Staff lẫn Customer
-      const staffEmail = await Staff.findOne({ email: cleanEmail, _id: { $ne: userId } });
-      const custEmail = await Customer.findOne({ email: cleanEmail, _id: { $ne: userId } });
+      // Kiểm tra Email trong cả 2 bảng (Staff & Customer)
+      const staffEmail = isStaff
+        ? await Staff.findOne({ email: cleanEmail, _id: { $ne: userId } })
+        : await Staff.findOne({ email: cleanEmail });
+
+      const custEmail = isStaff
+        ? await Customer.findOne({ email: cleanEmail })
+        : await Customer.findOne({ email: cleanEmail, _id: { $ne: userId } });
+
       if (staffEmail || custEmail) {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 400);
       }
-
       updateData.email = cleanEmail;
     }
 
+    // 2. Kiểm tra Số điện thoại mới
+    if (phone !== undefined) {
+      const cleanPhone = (phone || '').trim();
+      if (!cleanPhone) {
+        return sendError(res, 'Vui lòng nhập số điện thoại hợp lệ.', 400);
+      }
+      const phoneRegex = /(0[3|5|7|8|9])+([0-9]{8})\b/;
+      if (!phoneRegex.test(cleanPhone)) {
+        return sendError(res, 'Số điện thoại không đúng định dạng (10 chữ số)!', 400);
+      }
+
+      // Kiểm tra SĐT trong cả 2 bảng (Staff & Customer)
+      const staffPhone = isStaff
+        ? await Staff.findOne({ phone: cleanPhone, _id: { $ne: userId } })
+        : await Staff.findOne({ phone: cleanPhone });
+
+      const custPhone = isStaff
+        ? await Customer.findOne({ phone: cleanPhone })
+        : await Customer.findOne({ phone: cleanPhone, _id: { $ne: userId } });
+
+      if (staffPhone || custPhone) {
+        return sendError(res, 'Số điện thoại này đã được sử dụng bởi tài khoản khác!', 400);
+      }
+      updateData.phone = cleanPhone;
+    }
+
     let updatedUser = null;
-    if (req.userType === 'STAFF' || req.user.role === 'ADMIN' || req.user.role === 'STAFF') {
+    if (isStaff) {
       updatedUser = await Staff.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');
     } else {
       updatedUser = await Customer.findByIdAndUpdate(userId, updateData, { new: true }).select('-password -resetOtp -resetOtpExpiry');

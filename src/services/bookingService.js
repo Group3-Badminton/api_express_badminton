@@ -2268,19 +2268,18 @@ class BookingService {
         }
         await booking.save({ session });
 
-        account.bookingCancellationHistory.push(cancellationCtx.audit);
         account.bookingCancellationVersion += 1;
         if (cancellationCtx.accountLocked) {
-          account.status = "LOCKED";
+          account.status = 'LOCKED';
           account.lockReason = CUSTOMER_CANCELLATION_LOCK_REASON;
           account.lockedAt = cancellationCtx.cancelledAt;
           account.lockedByBookingId = booking._id;
           account.accountLockHistory.push({
-            action: "LOCKED",
+            action: 'LOCKED',
             reason: CUSTOMER_CANCELLATION_LOCK_REASON,
             occurredAt: cancellationCtx.cancelledAt,
             performedBy: customerId,
-            bookingId: booking._id,
+            bookingId: booking._id
           });
         }
         await account.save({ session });
@@ -2486,21 +2485,21 @@ class BookingService {
 
       const accountUpdate = {
         $push: { bookingCancellationHistory: cancellationCtx.audit },
-        $inc: { bookingCancellationVersion: 1 },
+        $inc: { bookingCancellationVersion: 1 }
       };
       if (cancellationCtx.accountLocked) {
         accountUpdate.$set = {
-          status: "LOCKED",
+          status: 'LOCKED',
           lockReason: CUSTOMER_CANCELLATION_LOCK_REASON,
           lockedAt: cancellationCtx.cancelledAt,
-          lockedByBookingId: booking._id,
+          lockedByBookingId: booking._id
         };
         accountUpdate.$push.accountLockHistory = {
-          action: "LOCKED",
+          action: 'LOCKED',
           reason: CUSTOMER_CANCELLATION_LOCK_REASON,
           occurredAt: cancellationCtx.cancelledAt,
           performedBy: customerId,
-          bookingId: booking._id,
+          bookingId: booking._id
         };
       }
       const accountResult = await Customer.updateOne(
