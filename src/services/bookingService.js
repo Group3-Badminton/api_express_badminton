@@ -310,7 +310,13 @@ class BookingService {
     }
   }
 
-  async assertOrdersAvailable(orders, bookingDate, excludeBookingId, session) {
+  async assertOrdersAvailable(
+    orders,
+    bookingDate,
+    excludeBookingId,
+    session,
+    skipScheduleConflict = false,
+  ) {
     if (!Array.isArray(orders) || orders.length === 0) {
       const err = new Error("Ngày đặt sân, sân và khung giờ không hợp lệ.");
       err.statusCode = 400;
@@ -415,6 +421,9 @@ class BookingService {
         const err = new Error(courtEligibility.reason);
         err.statusCode = 400;
         throw err;
+      }
+      if (skipScheduleConflict) {
+        continue;
       }
       const startOfDay = new Date(order.bookingDate);
       startOfDay.setHours(0, 0, 0, 0);
@@ -1726,12 +1735,15 @@ class BookingService {
       throw err;
     }
 
-    const finalStatus =
+    const isCustomerOrGuest = !(
       currentUser?.role === "ADMIN" || currentUser?.role === "STAFF"
-        ? bodyStatus === "PENDING_APPROVAL"
-          ? "PENDING_APPROVAL"
-          : "CONFIRMED"
-        : "PENDING_APPROVAL";
+    );
+
+    const finalStatus = isCustomerOrGuest
+      ? "PENDING_APPROVAL"
+      : bodyStatus === "PENDING_APPROVAL"
+        ? "PENDING_APPROVAL"
+        : "CONFIRMED";
     const created = await this.withCourtLocks(
       uniqueCourtIds,
       async (session, lease) => {
@@ -1740,11 +1752,13 @@ class BookingService {
           bookingDateObj,
           null,
           session,
+          isCustomerOrGuest,
         );
+        const effectiveVoucherCode = isCustomerOrGuest ? undefined : voucherCode;
         const priceCalculation = await this.calculateBookingPrice({
           courtOrders: targetOrders,
           bookingDate: effectiveBookingDate,
-          voucherCode,
+          voucherCode: effectiveVoucherCode,
         });
         if (priceCalculation.courtBreakdowns.length !== targetOrders.length) {
           const err = new Error(
@@ -1755,8 +1769,9 @@ class BookingService {
         }
 
         const { courtBreakdowns, totalBasePrice, discount } = priceCalculation;
-        const appliedVoucherId =
-          priceCalculation.appliedVoucher?.voucherId || null;
+        const appliedVoucherId = isCustomerOrGuest
+          ? null
+          : priceCalculation.appliedVoucher?.voucherId || null;
         if (lease) await lease.ensure();
         if (appliedVoucherId) {
           await Voucher.updateOne(
@@ -1827,11 +1842,9 @@ class BookingService {
               price: safeTotalBasePrice,
               discount: safeDiscount,
               totalAmount: safeTotalAmount,
-              paymentMethod: paymentMethod || "CASH",
+              paymentMethod: isCustomerOrGuest ? "CASH" : paymentMethod || "CASH",
               paymentStatus:
-                (currentUser?.role === "ADMIN" ||
-                  currentUser?.role === "STAFF") &&
-                  bodyPaymentStatus === "PAID"
+                !isCustomerOrGuest && bodyPaymentStatus === "PAID"
                   ? "PAID"
                   : "UNPAID",
               status: finalStatus,
@@ -3632,6 +3645,7 @@ class BookingService {
         targetBookingDate,
         booking._id,
         session,
+        isCustomer,
       );
       const priceCalculation = await this.calculateBookingPrice({
         courtOrders: targetOrders,
