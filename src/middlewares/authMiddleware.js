@@ -85,7 +85,7 @@ const optionalAuth = async (req, res, next) => {
         }
       }
     } catch (e) {
-      // Bỏ qua lỗi token khi optional
+      
     }
   }
   next();

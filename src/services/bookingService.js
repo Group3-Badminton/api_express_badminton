@@ -8,6 +8,7 @@ const PriceRule = require("../models/priceRule");
 const Voucher = require("../models/voucher");
 const Notification = require("../models/notification");
 const PlayingSession = require("../models/playingSession");
+const Invoice = require("../models/invoice");
 const { canBookCourt } = require("../utils/courtValidation");
 
 // Hàm tiện ích chuyển đổi giờ HH:mm sang phút
@@ -697,6 +698,7 @@ class BookingService {
       completedCount,
       cancelledCount,
       revenueResult,
+      invoiceRevenueResult,
     ] = await Promise.all([
       Booking.countDocuments(statsFilter),
       Booking.countDocuments({
@@ -711,7 +713,6 @@ class BookingService {
         {
           $match: {
             ...statsFilter,
-            status: { $in: ["CONFIRMED", "CHECKED_IN", "COMPLETED"] },
             paymentStatus: "PAID",
           },
         },
@@ -722,11 +723,27 @@ class BookingService {
           },
         },
       ]),
+      // Lấy thêm doanh thu từ các Hóa đơn POS bán lẻ độc lập đã thanh toán (tránh cộng trùng ca đặt sân)
+      Invoice.aggregate([
+        {
+          $match: {
+            paymentStatus: "PAID",
+            orderType: "POS",
+            status: "ACTIVE"
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalInvoiceRevenue: { $sum: "$totalAmount" }
+          }
+        }
+      ])
     ]);
 
-    const totalRevenue =
-      revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
-
+    const bookingRev = revenueResult.length > 0 ? (revenueResult[0].totalRevenue || 0) : 0;
+    const posRev = invoiceRevenueResult && invoiceRevenueResult.length > 0 ? (invoiceRevenueResult[0].totalInvoiceRevenue || 0) : 0;
+    const totalRevenue = bookingRev + posRev;
     return {
       bookings,
       pagination: {
@@ -792,8 +809,9 @@ class BookingService {
    * 3. Lấy danh sách sân thi đấu
    */
   async getCourts() {
-    return Court.find({ status: "ACTIVE" })
-      .select("_id courtName courtType location description status")
+    return Court.find({})
+      .select("_id name courtName courtType location description status operationalStatus")
+      .sort({ courtName: 1, name: 1 })
       .lean();
   }
 
@@ -974,6 +992,27 @@ class BookingService {
       }
       return slotDetail;
     });
+    // Rút trích danh sách khoảng giờ đã đặt (startTime - endTime) để client dùng trực tiếp
+    const bookedRanges = [];
+    activeBookings.forEach((b) => {
+      if (Array.isArray(b.items) && b.items.length > 0) {
+        b.items.forEach((item) => {
+          if (item.status === "CANCELLED") return;
+          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
+          const itemDate = new Date(item.bookingDate || b.bookingDate);
+          if (itemCourtId === courtId.toString() && itemDate >= startOfDay && itemDate <= endOfDay) {
+            if (item.startTime && item.endTime) {
+              bookedRanges.push({ startTime: item.startTime, endTime: item.endTime, bookingCode: b.bookingCode });
+            }
+          }
+        });
+      } else {
+        const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
+        if (bCourtId === courtId.toString() && b.startTime && b.endTime) {
+          bookedRanges.push({ startTime: b.startTime, endTime: b.endTime, bookingCode: b.bookingCode });
+        }
+      }
+    });
 
     return {
       court: {
@@ -986,6 +1025,7 @@ class BookingService {
       bookingDate,
       dayType,
       slots: slotDetails,
+      bookedRanges,
     };
   }
 
