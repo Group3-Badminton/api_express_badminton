@@ -13,7 +13,6 @@ exports.login = async (req, res) => {
       return sendError(res, 'Vui lòng nhập đầy đủ Email/Số điện thoại và Mật khẩu!', 400);
     }
 
-    // 1. Tìm trong bảng Staff (Admin/Staff) trước
     let user = await Staff.findOne({
       $or: [
         { email: loginIdentifier },
@@ -22,7 +21,6 @@ exports.login = async (req, res) => {
     });
     let userType = 'STAFF';
 
-    // 2. Nếu không có trong Staff, tìm trong bảng Customer
     if (!user) {
       user = await Customer.findOne({
         $or: [
@@ -37,7 +35,6 @@ exports.login = async (req, res) => {
       return sendError(res, 'Tài khoản hoặc mật khẩu không chính xác!', 401);
     }
 
-    // Nếu tài khoản tại quầy chưa được thiết lập mật khẩu online
     if (!user.password) {
       return sendError(
         res,
@@ -46,13 +43,11 @@ exports.login = async (req, res) => {
       );
     }
 
-    // 3. Kiểm tra mật khẩu
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return sendError(res, 'Tài khoản hoặc mật khẩu không chính xác!', 401);
     }
 
-    // 4. Kiểm tra trạng thái tài khoản
     if (user.status !== 'ACTIVE') {
       return sendError(
         res,
@@ -61,14 +56,12 @@ exports.login = async (req, res) => {
       );
     }
 
-    // 5. Tạo JWT Token kèm thông tin userType và role
     const token = jwt.sign(
       { userId: user._id, role: user.role, email: user.email, userType },
       process.env.JWT_SECRET || 'badminton_secret_key_2026',
       { expiresIn: '3h' }
     );
 
-    // 6. Trả dữ liệu về Frontend
     const userData = {
       _id: user._id,
       email: user.email,
@@ -98,7 +91,6 @@ exports.register = async (req, res) => {
       return sendError(res, 'Số điện thoại không hợp lệ! Vui lòng nhập đúng số điện thoại (10 chữ số).', 400);
     }
 
-    // 1. Kiểm tra Email có bị trùng với Staff không
     const staffEmailExists = await Staff.findOne({ email: cleanEmail });
     if (staffEmailExists) {
       return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
@@ -124,7 +116,6 @@ exports.register = async (req, res) => {
         return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
       }
     }
-
     // Nếu SĐT đã có tài khoản trực tuyến (đã có password)
     if (existingByPhone && existingByPhone.password && existingByPhone.status !== 'PENDING_VERIFICATION') {
       return sendError(res, 'Số điện thoại này đã được đăng ký tài khoản online. Vui lòng đăng nhập hoặc chọn Quên mật khẩu.', 400);
@@ -181,8 +172,6 @@ exports.sendOtp = async (req, res) => {
       return sendError(res, 'Vui lòng nhập địa chỉ Email!', 400);
     }
     const cleanEmail = email.trim().toLowerCase();
-
-    // Tìm trong Staff hoặc Customer
     let user = await Staff.findOne({ email: cleanEmail });
     if (!user) {
       user = await Customer.findOne({ email: cleanEmail });
