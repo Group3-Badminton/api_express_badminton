@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const courtController = require('../controllers/courtController');
-const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
 // Tất cả thao tác trong trang Quản lý sân yêu cầu đăng nhập
 router.use(authenticateUser);
@@ -10,8 +10,8 @@ router.get('/', authorizeRole(['ADMIN', 'STAFF']), courtController.getCourts);
 router.get('/:id', authorizeRole(['ADMIN', 'STAFF']), courtController.getCourtById);
 
 // UC-9.3, UC-9.4, UC-9.5: Thao tác CRUD Tạo, Sửa, Vô hiệu hóa sân (CHỈ ADMIN)
-router.post('/', checkAdmin, courtController.createCourt);
-router.patch('/:id', checkAdmin, courtController.updateCourt);
-router.patch('/:id/deactivate', checkAdmin, courtController.deactivateCourt);
+router.post('/', authorizeRole('ADMIN'), courtController.createCourt);
+router.patch('/:id', authorizeRole('ADMIN'), courtController.updateCourt);
+router.patch('/:id/deactivate', authorizeRole('ADMIN'), courtController.deactivateCourt);
 
 module.exports = router;

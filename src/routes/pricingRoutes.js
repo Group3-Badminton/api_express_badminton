@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const pricingController = require('../controllers/pricingController');
-const { authenticateUser, authorizeRole, checkAdmin } = require('../middlewares/authMiddleware');
+const { authenticateUser, authorizeRole } = require('../middlewares/authMiddleware');
 
 // 1. API Public: Lấy danh mục loại sân và bảng giá cho HomePage
 router.get('/overview', pricingController.getPricingOverview);
@@ -13,9 +13,9 @@ router.get('/', authorizeRole(['ADMIN', 'STAFF']), pricingController.getAllPrice
 router.get('/:id', authorizeRole(['ADMIN', 'STAFF']), pricingController.getPriceRuleById);
 
 // Thao tác CRUD Tạo, Sửa, Vô hiệu hóa, Kích hoạt bảng giá (CHỈ ADMIN)
-router.post('/', checkAdmin, pricingController.createPriceRule);
-router.put('/:id', checkAdmin, pricingController.updatePriceRule);
-router.patch('/:id/deactivate', checkAdmin, pricingController.deactivatePriceRule);
-router.patch('/:id/activate', checkAdmin, pricingController.activatePriceRule);
+router.post('/', authorizeRole('ADMIN'), pricingController.createPriceRule);
+router.put('/:id', authorizeRole('ADMIN'), pricingController.updatePriceRule);
+router.patch('/:id/deactivate', authorizeRole('ADMIN'), pricingController.deactivatePriceRule);
+router.patch('/:id/activate', authorizeRole('ADMIN'), pricingController.activatePriceRule);
 
 module.exports = router;

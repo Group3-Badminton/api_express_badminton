@@ -32,7 +32,7 @@ const courtSchema = new mongoose.Schema(
 
     operationalStatus: {
       type: String,
-      enum: ['AVAILABLE', 'IN_USE', 'CLEANING', 'MAINTENANCE'],
+      enum: ['AVAILABLE', 'IN_USE', 'MAINTENANCE'],
       default: 'AVAILABLE'
     },
 

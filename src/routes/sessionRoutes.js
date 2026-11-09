@@ -11,22 +11,19 @@ router.get('/current', sessionController.getCurrentLiveBoard);
 router.get('/', sessionController.getAllSessions);
 router.get('/:id', sessionController.getSessionById);
 
-// 4. UC-12.1: Check-in bắt đầu phiên chơi
+// Check-in bắt đầu phiên chơi
 router.post('/check-in', sessionController.checkInSession);
 
-// 5. UC-12.2: Gia hạn thời gian chơi (+30m hoặc +60m)
+// Gia hạn thời gian chơi
 router.post('/:id/extend', sessionController.extendSession);
 
-// 6. Đổi sân cho phiên đang chơi
+// Đổi sân cho phiên đang chơi
 router.post('/:id/switch-court', sessionController.switchCourt);
 
-// 7. UC-12.3: Check-out kết thúc phiên chơi & tính Overtime
+// Check-out kết thúc phiên chơi và tính Overtime
 router.post('/:id/check-out', sessionController.checkOutSession);
 
-// 8. Hoàn tất dọn dẹp sân (chuyển sang AVAILABLE)
-router.post('/courts/:courtId/clean-complete', sessionController.completeCleaning);
-
-// 9. Thêm đồ thuê / dịch vụ vào phiên chơi
+// Thêm đồ thuê / dịch vụ vào phiên chơi
 router.post('/:id/rentals', sessionController.addRentalItem);
 
 module.exports = router;

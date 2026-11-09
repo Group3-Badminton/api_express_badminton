@@ -2,13 +2,13 @@ const sessionService = require('../services/sessionService');
 const { sendSuccess, sendError } = require('../utils/response');
 
 /**
- * Controller quản lý phiên chơi (Playing Session Management)
+ * Controller quản lý phiên chơi
  * Tầng Controller chịu trách nhiệm nhận request, validation sơ bộ và trả về HTTP response
  * Logic nghiệp vụ được chuyển giao cho sessionService.
  */
 
 /**
- * UC-11.4: Lấy danh sách phiên chơi có lọc, phân trang, tìm kiếm
+ * Lấy danh sách phiên chơi có lọc, phân trang, tìm kiếm
  */
 exports.getAllSessions = async (req, res) => {
   try {
@@ -45,7 +45,7 @@ exports.getSessionById = async (req, res) => {
 };
 
 /**
- * UC-11.1: Check-in bắt đầu phiên chơi (Khách đặt trước hoặc Khách vãng lai)
+ * Check-in bắt đầu phiên chơi (khách đặt trước hoặc khách vãng lai)
  */
 exports.checkInSession = async (req, res) => {
   try {
@@ -58,7 +58,7 @@ exports.checkInSession = async (req, res) => {
 };
 
 /**
- * UC-11.2: Gia hạn ca chơi (+30m hoặc +60m)
+ * Gia hạn ca chơi (+30m hoặc +60m)
  */
 exports.extendSession = async (req, res) => {
   try {
@@ -85,7 +85,7 @@ exports.switchCourt = async (req, res) => {
 };
 
 /**
- * UC-11.3: Check-out kết thúc ca chơi, giải phóng sân & xuất hóa đơn tại quầy
+ * Check-out kết thúc ca chơi, giải phóng sân và xuất hóa đơn tại quầy
  */
 exports.checkOutSession = async (req, res) => {
   try {
@@ -93,19 +93,6 @@ exports.checkOutSession = async (req, res) => {
     const staffId = req.user?.userId;
     const result = await sessionService.checkOutSession(id, req.body, staffId);
     return sendSuccess(res, result, 'Kết thúc ca chơi thành công! Đã tạo hóa đơn thanh toán tại quầy.', 200);
-  } catch (error) {
-    return sendError(res, error.message, error.statusCode || 500);
-  }
-};
-
-/**
- * Hoàn tất dọn dẹp sân (chuyển trạng thái sang AVAILABLE)
- */
-exports.completeCleaning = async (req, res) => {
-  try {
-    const { courtId } = req.params;
-    const court = await sessionService.completeCleaning(courtId);
-    return sendSuccess(res, court, `Sân ${court.name} đã dọn dẹp xong và sẵn sàng nhận khách!`, 200);
   } catch (error) {
     return sendError(res, error.message, error.statusCode || 500);
   }

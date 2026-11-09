@@ -50,7 +50,7 @@ class InvoiceService {
   }
 
   /**
-   * UC-12.2: Lấy danh sách hóa đơn kèm phân trang, tìm kiếm, lọc và thống kê doanh thu
+   * Lấy danh sách hóa đơn kèm phân trang, tìm kiếm, lọc và thống kê doanh thu
    */
   async getInvoices(queryParams = {}) {
     const {
@@ -180,7 +180,7 @@ class InvoiceService {
   }
 
   /**
-   * UC-12.3: Xem chi tiết hóa đơn theo ID
+   * Xem chi tiết hóa đơn theo ID
    */
   async getInvoiceById(id) {
     const invoice = await Invoice.findById(id)
@@ -204,7 +204,7 @@ class InvoiceService {
   }
 
   /**
-   * UC-12.5: Kiểm tra và áp dụng thử Voucher cho hóa đơn
+   * Kiểm tra và tính toán giảm giá từ Voucher cho hóa đơn
    */
   async validateVoucherForInvoice(payload = {}) {
     const { code, orderAmount = 0 } = payload;
@@ -237,7 +237,7 @@ class InvoiceService {
   }
 
   /**
-   * UC-12.1: Thanh toán & quyết toán hóa đơn ca chơi tại quầy
+   * Thanh toán và quyết toán hóa đơn ca chơi tại quầy
    */
   async settleSessionInvoice(id, payload = {}, staffId = null) {
     const {
@@ -315,7 +315,7 @@ class InvoiceService {
   }
 
   /**
-   * UC-12.4: Thanh toán bán hàng POS trực tiếp tại quầy
+   * Thanh toán bán hàng POS trực tiếp tại quầy
    */
   async createPosPayment(payload = {}, staffId = null) {
     const {

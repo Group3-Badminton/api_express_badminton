@@ -13,7 +13,6 @@ const bookingService = require('./bookingService');
 const {
   scheduleSessionNearEndWarning,
   cancelSessionWarning,
-  scheduleAutoCleanFinish,
   autoCancelLateBookings
 } = require('../schedulers/sessionScheduler');
 
@@ -914,21 +913,6 @@ class SessionService {
       invoice,
       overtimeAlert: null
     };
-  }
-
-  /**
-   * Hoàn tất dọn dẹp sân, chuyển trạng thái sân sang AVAILABLE
-   */
-  async completeCleaning(courtId) {
-    const court = await Court.findById(courtId);
-    if (!court) {
-      throw createError('Không tìm thấy sân!', 404);
-    }
-
-    court.operationalStatus = 'AVAILABLE';
-    await court.save();
-
-    return court;
   }
 
   /**
