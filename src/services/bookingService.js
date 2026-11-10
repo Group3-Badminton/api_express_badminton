@@ -337,6 +337,19 @@ class BookingService {
         throw err;
       }
 
+      const startMinCheck = parseTimeToMinutes(order.startTime);
+      const endMinCheck = parseTimeToMinutes(order.endTime);
+      if (endMinCheck - startMinCheck < 60) {
+        const err = new Error("Thời gian thuê sân tối thiểu là 1 tiếng (60 phút).");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (startMinCheck % 15 !== 0 || endMinCheck % 15 !== 0) {
+        const err = new Error("Khung giờ thuê sân phải làm tròn theo các mốc 00, 15, 30 hoặc 45 phút.");
+        err.statusCode = 400;
+        throw err;
+      }
+
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
       if (startOfDay < today) {
@@ -454,7 +467,7 @@ class BookingService {
     };
     return {
       ...(excludeBookingId ? { _id: { $ne: excludeBookingId } } : {}),
-      status: { $in: ["CONFIRMED", "CHECKED_IN", "COMPLETED"] },
+      status: { $in: ["PENDING_APPROVAL", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
       $or: [
         {
           items: {
@@ -975,6 +988,33 @@ class BookingService {
       return slotDetail;
     });
 
+    const bookedRanges = [];
+    for (const b of activeBookings) {
+      if (Array.isArray(b.items) && b.items.length > 0) {
+        for (const item of b.items) {
+          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
+          if (item.status !== "CANCELLED" && itemCourtId === courtId.toString()) {
+            bookedRanges.push({
+              startTime: item.startTime,
+              endTime: item.endTime,
+              bookingCode: b.bookingCode,
+              status: item.status || b.status
+            });
+          }
+        }
+      } else {
+        const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
+        if (bCourtId === courtId.toString()) {
+          bookedRanges.push({
+            startTime: b.startTime,
+            endTime: b.endTime,
+            bookingCode: b.bookingCode,
+            status: b.status
+          });
+        }
+      }
+    }
+
     return {
       court: {
         _id: court._id,
@@ -986,6 +1026,7 @@ class BookingService {
       bookingDate,
       dayType,
       slots: slotDetails,
+      bookedRanges,
     };
   }
 
@@ -1672,6 +1713,19 @@ class BookingService {
         const err = new Error(
           "Một hoặc nhiều sân hoặc khung giờ không hợp lệ.",
         );
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const ordStartMin = parseTimeToMinutes(ord.startTime);
+      const ordEndMin = parseTimeToMinutes(ord.endTime);
+      if (ordEndMin - ordStartMin < 60) {
+        const err = new Error("Thời gian thuê sân tối thiểu là 1 tiếng (60 phút)!");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (ordStartMin % 15 !== 0 || ordEndMin % 15 !== 0) {
+        const err = new Error("Khung giờ thuê sân phải làm tròn theo các mốc 00, 15, 30 hoặc 45 phút!");
         err.statusCode = 400;
         throw err;
       }
