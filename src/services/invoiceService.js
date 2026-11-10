@@ -207,6 +207,9 @@ class InvoiceService {
    * Kiểm tra và tính toán giảm giá từ Voucher cho hóa đơn
    */
   async validateVoucherForInvoice(payload = {}) {
+    // VOUCHER BỊ LOẠI BỎ KHỎI MÁY POS & THANH TOÁN TẠI QUẦY (CHỈ ÁP DỤNG CHO KHÁCH HÀNG ONLINE)
+    throw createError('Mã giảm giá chỉ áp dụng cho khách hàng khi đặt sân trực tuyến!', 400);
+    /*
     const { code, orderAmount = 0 } = payload;
     if (!code || !code.trim()) {
       throw createError('Vui lòng nhập mã giảm giá!', 400);
@@ -234,6 +237,7 @@ class InvoiceService {
       discountAmount,
       finalAmount
     };
+    */
   }
 
   /**
@@ -258,9 +262,10 @@ class InvoiceService {
     }
 
     const subtotal = Number(invoice.subtotal) || 0;
+    // VOUCHER BỊ LOẠI BỎ KHỎI THANH TOÁN TẠI QUẦY (CHỈ DÀNH CHO KHÁCH HÀNG ONLINE)
     let discountAmount = 0;
     let appliedVoucher = null;
-
+    /*
     if (voucherCode && voucherCode.trim()) {
       const cleanCode = voucherCode.trim().toUpperCase();
       appliedVoucher = await Voucher.findOne({ code: cleanCode });
@@ -269,6 +274,7 @@ class InvoiceService {
       }
       discountAmount = this.calculateVoucherDiscount(appliedVoucher, subtotal);
     }
+    */
 
     const totalAmount = Math.max(0, subtotal - discountAmount);
     let changeAmount = 0;
@@ -366,9 +372,10 @@ class InvoiceService {
       });
     }
 
+    // VOUCHER BỊ LOẠI BỎ KHỎI MÁY POS (CHỈ DÀNH CHO KHÁCH HÀNG ONLINE)
     let discountAmount = 0;
     let appliedVoucher = null;
-
+    /*
     if (voucherCode && voucherCode.trim()) {
       const cleanCode = voucherCode.trim().toUpperCase();
       appliedVoucher = await Voucher.findOne({ code: cleanCode });
@@ -377,6 +384,7 @@ class InvoiceService {
       }
       discountAmount = this.calculateVoucherDiscount(appliedVoucher, subtotal);
     }
+    */
 
     const totalAmount = Math.max(0, subtotal - discountAmount);
     let changeAmount = 0;
