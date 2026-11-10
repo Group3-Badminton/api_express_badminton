@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Court = require('../models/court');
+const Booking = require('../models/booking');
 const { sendSuccess, sendError } = require('../utils/response');
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -279,11 +280,100 @@ exports.deactivateCourt = async (req, res) => {
       return sendSuccess(res, sanitizeCourt(targetCourt), 'Sân cầu lông đã ở trạng thái vô hiệu hóa.', 200);
     }
 
+    // Kiểm tra ràng buộc: Sân đang có người đặt trước hoặc đang chơi thì không được vô hiệu hóa
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const activeBooking = await Booking.findOne({
+      $and: [
+        {
+          $or: [
+            { courtId: id },
+            { 'items.courtId': id }
+          ]
+        },
+        {
+          $or: [
+            { status: 'CHECKED_IN' },
+            {
+              status: { $in: ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED'] },
+              bookingDate: { $gte: startOfToday }
+            }
+          ]
+        }
+      ]
+    });
+
+    if (activeBooking) {
+      const statusText = activeBooking.status === 'CHECKED_IN' ? 'đang có khách chơi' : 'đang có khách đặt trước';
+      return sendError(
+        res,
+        `Không thể vô hiệu hóa sân này vì ${statusText} (Mã đơn: #${activeBooking.bookingCode})! Vui lòng hoàn tất hoặc hủy đơn trước khi vô hiệu hóa.`,
+        400
+      );
+    }
+
     targetCourt.status = 'INACTIVE';
     await targetCourt.save();
 
     return sendSuccess(res, sanitizeCourt(targetCourt), 'Vô hiệu hóa sân cầu lông thành công!', 200);
   } catch (error) {
     return sendError(res, 'Unable to deactivate the court. Please try again.', 500);
+  }
+};
+
+/**
+ * Delete Court (Hard Delete)
+ * Actor: ADMIN (ACTIVE) only
+ */
+exports.deleteCourt = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 'The selected court is unavailable.', 404);
+    }
+
+    const targetCourt = await Court.findById(id);
+    if (!targetCourt) {
+      return sendError(res, 'The selected court is unavailable.', 404);
+    }
+
+    // Kiểm tra ràng buộc: Sân đang có người đặt trước hoặc đang chơi thì không được xóa
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const activeBooking = await Booking.findOne({
+      $and: [
+        {
+          $or: [
+            { courtId: id },
+            { 'items.courtId': id }
+          ]
+        },
+        {
+          $or: [
+            { status: 'CHECKED_IN' },
+            {
+              status: { $in: ['PENDING', 'PENDING_APPROVAL', 'CONFIRMED'] },
+              bookingDate: { $gte: startOfToday }
+            }
+          ]
+        }
+      ]
+    });
+
+    if (activeBooking) {
+      const statusText = activeBooking.status === 'CHECKED_IN' ? 'đang có khách chơi' : 'đang có khách đặt trước';
+      return sendError(
+        res,
+        `Không thể xóa sân này vì ${statusText} (Mã đơn: #${activeBooking.bookingCode})! Vui lòng hoàn tất hoặc hủy đơn trước khi xóa sân.`,
+        400
+      );
+    }
+
+    await Court.findByIdAndDelete(id);
+    return sendSuccess(res, null, 'Xóa sân cầu lông thành công!', 200);
+  } catch (error) {
+    return sendError(res, 'Unable to delete the court. Please try again.', 500);
   }
 };

@@ -654,13 +654,45 @@ class SessionService {
 
     await session.save();
 
+    // Đồng bộ thời gian và giá tiền gia hạn sang Booking để phía Customer hiển thị chính xác
     if (session.bookingId) {
-      const updateDoc = { endTime: newEndHoursStr };
       const bk = await Booking.findById(currentBookingId);
-      if (bk && Array.isArray(bk.items) && bk.items.length > 0) {
-        updateDoc['items.$[].endTime'] = newEndHoursStr;
+      if (bk) {
+        bk.endTime = newEndHoursStr;
+        bk.price = (bk.price || 0) + extensionFee;
+        bk.totalAmount = Math.max(0, (bk.totalAmount || 0) + extensionFee);
+
+        if (Array.isArray(bk.items) && bk.items.length > 0) {
+          let targetItem = bk.items.find(
+            (it) => it.courtId?.toString() === currentCourtId.toString() && it.status !== 'CANCELLED'
+          );
+          if (!targetItem) {
+            targetItem = bk.items[0];
+          }
+
+          if (targetItem) {
+            targetItem.endTime = newEndHoursStr;
+            targetItem.durationMinutes = (targetItem.durationMinutes || 0) + minutes;
+            targetItem.durationHours = Math.round(((targetItem.durationMinutes) / 60) * 10) / 10;
+            targetItem.price = (targetItem.price || 0) + extensionFee;
+
+            if (!Array.isArray(targetItem.intervals)) {
+              targetItem.intervals = [];
+            }
+            targetItem.intervals.push({
+              startTime: currentEndHoursStr,
+              endTime: newEndHoursStr,
+              durationMinutes: minutes,
+              durationHours: Math.round((minutes / 60) * 10) / 10,
+              priceType: `Gia hạn thời gian (+${minutes}p)`,
+              hourlyRate: Math.round(extensionFee / (minutes / 60)),
+              amount: extensionFee
+            });
+          }
+        }
+
+        await bk.save();
       }
-      await Booking.findByIdAndUpdate(currentBookingId, updateDoc);
     }
 
     scheduleSessionNearEndWarning(session, session.courtId.name);
@@ -835,7 +867,9 @@ class SessionService {
 
     session.totalAmount = session.baseCourtFee + session.earlyCheckInFee + totalExtensionsFee + totalRentalItemFee;
     session.status = 'COMPLETED';
-    session.actualDuration = session.scheduledStartTime ? Math.round((now - session.scheduledStartTime) / (60 * 1000)) : 60;
+    const startPoint = session.startTime || session.checkInAt || session.scheduledStartTime;
+    const diffMin = startPoint ? Math.round((now - startPoint) / (60 * 1000)) : 60;
+    session.actualDuration = Math.max(0, diffMin);
     if (note) session.note = (session.note ? session.note + ' | ' : '') + note;
 
     await session.save();
@@ -872,6 +906,17 @@ class SessionService {
     const prepaidDeposit = isPrepaid ? (session.bookingId.totalAmount || session.baseCourtFee || 0) : 0;
     const finalInvoiceTotal = Math.max(0, session.totalAmount - prepaidDeposit);
 
+    // Tính thời lượng giờ chơi tiêu chuẩn từ lịch đặt
+    let scheduledDurationHours = 1;
+    if (session.scheduledStartTime && session.scheduledEndTime) {
+      const diffMs = new Date(session.scheduledEndTime).getTime() - new Date(session.scheduledStartTime).getTime();
+      if (diffMs > 0) {
+        scheduledDurationHours = Math.round((diffMs / (60 * 60 * 1000)) * 10) / 10;
+      }
+    } else if (session.actualDuration && session.actualDuration > 0) {
+      scheduledDurationHours = Math.round((session.actualDuration / 60) * 10) / 10;
+    }
+
     const invoice = await Invoice.create({
       playingSessionId: session._id,
       staffId: staffId || session.staffId,
@@ -891,7 +936,7 @@ class SessionService {
       },
       sessionDetails: {
         courtName: session.courtId?.name || '',
-        scheduledDurationHours: session.actualDuration ? Math.round((session.actualDuration / 60) * 10) / 10 : 1,
+        scheduledDurationHours,
         baseCourtFee: session.baseCourtFee || 0,
         earlyCheckInFee: session.earlyCheckInFee || 0,
         overtimeFee: 0,

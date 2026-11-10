@@ -8,6 +8,7 @@ const PriceRule = require("../models/priceRule");
 const Voucher = require("../models/voucher");
 const Notification = require("../models/notification");
 const PlayingSession = require("../models/playingSession");
+const Invoice = require("../models/invoice");
 const { canBookCourt } = require("../utils/courtValidation");
 
 // Hàm tiện ích chuyển đổi giờ HH:mm sang phút
@@ -343,6 +344,19 @@ class BookingService {
         throw err;
       }
 
+      const startMinCheck = parseTimeToMinutes(order.startTime);
+      const endMinCheck = parseTimeToMinutes(order.endTime);
+      if (endMinCheck - startMinCheck < 60) {
+        const err = new Error("Thời gian thuê sân tối thiểu là 1 tiếng (60 phút).");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (startMinCheck % 15 !== 0 || endMinCheck % 15 !== 0) {
+        const err = new Error("Khung giờ thuê sân phải làm tròn theo các mốc 00, 15, 30 hoặc 45 phút.");
+        err.statusCode = 400;
+        throw err;
+      }
+
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
       if (startOfDay < today) {
@@ -463,7 +477,7 @@ class BookingService {
     };
     return {
       ...(excludeBookingId ? { _id: { $ne: excludeBookingId } } : {}),
-      status: { $in: ["CONFIRMED", "CHECKED_IN", "COMPLETED"] },
+      status: { $in: ["PENDING_APPROVAL", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
       $or: [
         {
           items: {
@@ -706,6 +720,7 @@ class BookingService {
       completedCount,
       cancelledCount,
       revenueResult,
+      invoiceRevenueResult,
     ] = await Promise.all([
       Booking.countDocuments(statsFilter),
       Booking.countDocuments({
@@ -720,7 +735,6 @@ class BookingService {
         {
           $match: {
             ...statsFilter,
-            status: { $in: ["CONFIRMED", "CHECKED_IN", "COMPLETED"] },
             paymentStatus: "PAID",
           },
         },
@@ -731,11 +745,27 @@ class BookingService {
           },
         },
       ]),
+      // Lấy thêm doanh thu từ các Hóa đơn POS bán lẻ độc lập đã thanh toán (tránh cộng trùng ca đặt sân)
+      Invoice.aggregate([
+        {
+          $match: {
+            paymentStatus: "PAID",
+            orderType: "POS",
+            status: "ACTIVE"
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalInvoiceRevenue: { $sum: "$totalAmount" }
+          }
+        }
+      ])
     ]);
 
-    const totalRevenue =
-      revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
-
+    const bookingRev = revenueResult.length > 0 ? (revenueResult[0].totalRevenue || 0) : 0;
+    const posRev = invoiceRevenueResult && invoiceRevenueResult.length > 0 ? (invoiceRevenueResult[0].totalInvoiceRevenue || 0) : 0;
+    const totalRevenue = bookingRev + posRev;
     return {
       bookings,
       pagination: {
@@ -801,8 +831,9 @@ class BookingService {
    * 3. Lấy danh sách sân thi đấu
    */
   async getCourts() {
-    return Court.find({ status: "ACTIVE" })
-      .select("_id courtName courtType location description status")
+    return Court.find({})
+      .select("_id name courtName courtType location description status operationalStatus")
+      .sort({ courtName: 1, name: 1 })
       .lean();
   }
 
@@ -983,6 +1014,54 @@ class BookingService {
       }
       return slotDetail;
     });
+    // Rút trích danh sách khoảng giờ đã đặt (startTime - endTime) để client dùng trực tiếp
+    const bookedRanges = [];
+    activeBookings.forEach((b) => {
+      if (Array.isArray(b.items) && b.items.length > 0) {
+        b.items.forEach((item) => {
+          if (item.status === "CANCELLED") return;
+          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
+          const itemDate = new Date(item.bookingDate || b.bookingDate);
+          if (itemCourtId === courtId.toString() && itemDate >= startOfDay && itemDate <= endOfDay) {
+            if (item.startTime && item.endTime) {
+              bookedRanges.push({ startTime: item.startTime, endTime: item.endTime, bookingCode: b.bookingCode });
+            }
+          }
+        });
+      } else {
+        const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
+        if (bCourtId === courtId.toString() && b.startTime && b.endTime) {
+          bookedRanges.push({ startTime: b.startTime, endTime: b.endTime, bookingCode: b.bookingCode });
+        }
+      }
+    });
+
+    const bookedRanges = [];
+    for (const b of activeBookings) {
+      if (Array.isArray(b.items) && b.items.length > 0) {
+        for (const item of b.items) {
+          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
+          if (item.status !== "CANCELLED" && itemCourtId === courtId.toString()) {
+            bookedRanges.push({
+              startTime: item.startTime,
+              endTime: item.endTime,
+              bookingCode: b.bookingCode,
+              status: item.status || b.status
+            });
+          }
+        }
+      } else {
+        const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
+        if (bCourtId === courtId.toString()) {
+          bookedRanges.push({
+            startTime: b.startTime,
+            endTime: b.endTime,
+            bookingCode: b.bookingCode,
+            status: b.status
+          });
+        }
+      }
+    }
 
     return {
       court: {
@@ -995,6 +1074,7 @@ class BookingService {
       bookingDate,
       dayType,
       slots: slotDetails,
+      bookedRanges,
     };
   }
 
@@ -1112,6 +1192,106 @@ class BookingService {
       discount,
       finalAmount,
     };
+  }
+
+  /**
+   * 6.1. Lấy danh sách mã giảm giá khả dụng và lọc các voucher thỏa điều kiện cho khách hàng
+   */
+  async getAvailableVouchers({ orderAmount = 0, courtBreakdowns = [], courtTypes = [] } = {}) {
+    const now = new Date();
+    const vouchers = await Voucher.find({
+      status: "ACTIVE",
+      $and: [
+        {
+          $or: [
+            { startDate: null },
+            { startDate: { $lte: now } }
+          ]
+        },
+        {
+          $or: [
+            { endDate: null },
+            { endDate: { $gte: now } }
+          ]
+        },
+        {
+          $or: [
+            { usageLimit: null },
+            { usageLimit: { $lte: 0 } },
+            { $expr: { $lt: ["$usedCount", "$usageLimit"] } }
+          ]
+        }
+      ]
+    }).sort({ createdAt: -1 }).lean();
+
+    const currentAmount = Number(orderAmount) || 0;
+    const result = [];
+
+    for (const voucher of vouchers) {
+      const applicableTypes = voucher.applicableCourtTypes || ["ALL"];
+      let applicableAmount = currentAmount;
+      let isCourtTypeOk = true;
+
+      if (!applicableTypes.includes("ALL")) {
+        if (Array.isArray(courtBreakdowns) && courtBreakdowns.length > 0) {
+          const matchingBreakdowns = courtBreakdowns.filter((cb) =>
+            isCourtTypeApplicable(applicableTypes, cb.courtType)
+          );
+          if (matchingBreakdowns.length === 0) {
+            isCourtTypeOk = false;
+          } else {
+            applicableAmount = matchingBreakdowns.reduce(
+              (sum, cb) => sum + (cb.totalAmount || 0),
+              0
+            );
+          }
+        } else if (Array.isArray(courtTypes) && courtTypes.length > 0) {
+          const hasMatching = courtTypes.some((ct) =>
+            isCourtTypeApplicable(applicableTypes, ct)
+          );
+          if (!hasMatching) {
+            isCourtTypeOk = false;
+          }
+        }
+      }
+
+      const minAmount = voucher.minOrderAmount ?? voucher.minInvoiceAmount ?? 0;
+      const isMinAmountOk = applicableAmount >= minAmount;
+      const isEligible = isCourtTypeOk && isMinAmountOk;
+
+      let discount = 0;
+      const maxDiscount = voucher.maxDiscount ?? voucher.maxDiscountAmount ?? 0;
+      if (voucher.discountType === "PERCENTAGE") {
+        discount = Math.round((applicableAmount * voucher.discountValue) / 100);
+        if (maxDiscount > 0 && discount > maxDiscount) {
+          discount = maxDiscount;
+        }
+      } else {
+        discount = Math.min(voucher.discountValue, applicableAmount);
+      }
+
+      result.push({
+        _id: voucher._id,
+        code: voucher.voucherCode || voucher.code,
+        name: voucher.voucherName || voucher.name,
+        discountType: voucher.discountType,
+        discountValue: voucher.discountValue,
+        maxDiscountAmount: maxDiscount,
+        minInvoiceAmount: minAmount,
+        applicableCourtTypes: applicableTypes,
+        calculatedDiscount: discount,
+        description: voucher.description || "",
+        endDate: voucher.endDate,
+        isEligible,
+        ineligibleReason: !isCourtTypeOk
+          ? `Chỉ áp dụng cho loại sân: ${applicableTypes.join(", ")}`
+          : !isMinAmountOk
+            ? `Đơn tối thiểu ${minAmount.toLocaleString("vi-VN")} đ`
+            : null
+      });
+    }
+
+    return result;
   }
 
   /**
@@ -1684,6 +1864,19 @@ class BookingService {
         err.statusCode = 400;
         throw err;
       }
+
+      const ordStartMin = parseTimeToMinutes(ord.startTime);
+      const ordEndMin = parseTimeToMinutes(ord.endTime);
+      if (ordEndMin - ordStartMin < 60) {
+        const err = new Error("Thời gian thuê sân tối thiểu là 1 tiếng (60 phút)!");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (ordStartMin % 15 !== 0 || ordEndMin % 15 !== 0) {
+        const err = new Error("Khung giờ thuê sân phải làm tròn theo các mốc 00, 15, 30 hoặc 45 phút!");
+        err.statusCode = 400;
+        throw err;
+      }
       const ordStartOfDay = new Date(ordDateObj);
       ordStartOfDay.setHours(0, 0, 0, 0);
       if (ordStartOfDay < today) {
@@ -1754,7 +1947,8 @@ class BookingService {
           session,
           isCustomerOrGuest,
         );
-        const effectiveVoucherCode = isCustomerOrGuest ? undefined : voucherCode;
+        // CHỈ CHO PHÉP KHÁCH HÀNG (CUSTOMER / GUEST) ÁP DỤNG VOUCHER. ADMIN / STAFF KHÔNG ĐƯỢC ÁP DỤNG.
+        const effectiveVoucherCode = isCustomerOrGuest ? voucherCode : undefined;
         const priceCalculation = await this.calculateBookingPrice({
           courtOrders: targetOrders,
           bookingDate: effectiveBookingDate,
@@ -1770,8 +1964,8 @@ class BookingService {
 
         const { courtBreakdowns, totalBasePrice, discount } = priceCalculation;
         const appliedVoucherId = isCustomerOrGuest
-          ? null
-          : priceCalculation.appliedVoucher?.voucherId || null;
+          ? priceCalculation.appliedVoucher?.voucherId || null
+          : null;
         if (lease) await lease.ensure();
         if (appliedVoucherId) {
           await Voucher.updateOne(
