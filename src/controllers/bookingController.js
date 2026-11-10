@@ -108,6 +108,21 @@ class BookingController {
     }
   }
 
+  // 6.5. Lấy danh sách voucher hợp lệ / khả dụng cho khách hàng
+  async getAvailableVouchers(req, res) {
+    try {
+      const { orderAmount, courtBreakdowns, courtTypes } = req.body || {};
+      const result = await bookingService.getAvailableVouchers({
+        orderAmount: orderAmount ?? req.query?.orderAmount,
+        courtBreakdowns: courtBreakdowns || [],
+        courtTypes: courtTypes || (req.query?.courtTypes ? [].concat(req.query.courtTypes) : [])
+      });
+      return sendSuccess(res, result, 'Lấy danh sách mã giảm giá thành công!', 200);
+    } catch (error) {
+      return sendError(res, error.message, error.statusCode || 500);
+    }
+  }
+
   // Tính toán bảng giá chi tiết theo từng sân và từng khung giờ (tách cao điểm / thấp điểm)
   async calculatePrice(req, res) {
     try {

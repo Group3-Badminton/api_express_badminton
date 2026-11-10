@@ -19,6 +19,10 @@ router.get('/availability', bookingController.getCourtAvailability);
 // 4. Kiểm tra và áp dụng mã giảm giá (Voucher)
 router.post('/validate-voucher', bookingController.validateVoucher);
 
+// 4.1. Lấy danh sách voucher khả dụng / thỏa mãn điều kiện cho khách hàng (cho phép công khai)
+router.post('/available-vouchers', bookingController.getAvailableVouchers);
+router.get('/available-vouchers', bookingController.getAvailableVouchers);
+
 // Tính giá chi tiết cho từng sân và từng khung giờ (tách cao điểm / thấp điểm)
 router.post('/calculate-price', bookingController.calculatePrice);
 
