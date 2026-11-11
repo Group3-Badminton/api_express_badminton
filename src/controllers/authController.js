@@ -4,6 +4,11 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendSuccess, sendError } = require('../utils/response');
 
+// Nhận diện tài khoản đã có mật khẩu thật (tương thích ngược với các bản ghi khách vãng lai cũ)
+const LEGACY_WALKIN_PASSWORDS = new Set(['guest_no_login_needed', 'WALK_IN_GUEST']);
+const hasRealPassword = (account) =>
+  Boolean(account?.password && !LEGACY_WALKIN_PASSWORDS.has(account.password));
+
 exports.login = async (req, res) => {
   try {
     const { account, password } = req.body;
@@ -35,7 +40,7 @@ exports.login = async (req, res) => {
       return sendError(res, 'Tài khoản hoặc mật khẩu không chính xác!', 401);
     }
 
-    if (!user.password) {
+    if (!hasRealPassword(user)) {
       return sendError(
         res,
         'Tài khoản này được tạo tại quầy và chưa kích hoạt mật khẩu Online. Vui lòng bấm "Đăng ký" bằng số điện thoại này để thiết lập mật khẩu!',
@@ -108,16 +113,16 @@ exports.register = async (req, res) => {
 
     // Nếu email đã được tài khoản khác (khác SĐT này) sử dụng và tài khoản đó đã có mật khẩu hoặc đang active
     if (existingByEmail && existingByPhone && existingByEmail._id.toString() !== existingByPhone._id.toString()) {
-      if (existingByEmail.password || existingByEmail.status !== 'PENDING_VERIFICATION') {
+      if (hasRealPassword(existingByEmail) || existingByEmail.status !== 'PENDING_VERIFICATION') {
         return sendError(res, 'Email này đã được sử dụng bởi tài khoản khác. Vui lòng chọn email khác!', 400);
       }
     } else if (existingByEmail && !existingByPhone) {
-      if (existingByEmail.password || existingByEmail.status !== 'PENDING_VERIFICATION') {
+      if (hasRealPassword(existingByEmail) || existingByEmail.status !== 'PENDING_VERIFICATION') {
         return sendError(res, 'Email này đã được sử dụng. Vui lòng chọn email khác!', 400);
       }
     }
     // Nếu SĐT đã có tài khoản trực tuyến (đã có password)
-    if (existingByPhone && existingByPhone.password && existingByPhone.status !== 'PENDING_VERIFICATION') {
+    if (existingByPhone && hasRealPassword(existingByPhone) && existingByPhone.status !== 'PENDING_VERIFICATION') {
       return sendError(res, 'Số điện thoại này đã được đăng ký tài khoản online. Vui lòng đăng nhập hoặc chọn Quên mật khẩu.', 400);
     }
 

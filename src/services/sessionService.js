@@ -416,15 +416,28 @@ class SessionService {
       scheduledStartTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0, 0);
       scheduledEndTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), eh, em, 0, 0);
 
-      let customerUser = await Customer.findOne({ phone: walkInCustomerPhone });
+      const rawPhone = typeof walkInCustomerPhone === 'string' ? walkInCustomerPhone.trim() : '';
+      const effectivePhone = rawPhone || '0900000000';
+      let customerUser = await Customer.findOne({ phone: effectivePhone });
       if (!customerUser) {
-        customerUser = await Customer.create({
-          fullName: walkInCustomerName || 'Khách vãng lai',
-          phone: walkInCustomerPhone || '0900000000',
-          role: 'CUSTOMER',
-          status: 'ACTIVE',
-          password: 'WALK_IN_GUEST'
-        });
+        try {
+          customerUser = await Customer.create({
+            fullName: (walkInCustomerName && walkInCustomerName.trim()) || 'Khách vãng lai',
+            phone: effectivePhone,
+            role: 'CUSTOMER',
+            status: 'ACTIVE',
+            password: null
+          });
+        } catch (err) {
+          if (err.code === 11000) {
+            customerUser = await Customer.findOne({ phone: effectivePhone });
+            if (!customerUser) {
+              throw createError('Số điện thoại này đã tồn tại trong hệ thống. Vui lòng kiểm tra lại!', 400);
+            }
+          } else {
+            throw err;
+          }
+        }
       }
 
       const bookingCode = 'BK-VL-' + Date.now().toString().slice(-6);
@@ -439,7 +452,7 @@ class SessionService {
         price: baseCourtFee,
         totalAmount: baseCourtFee,
         status: 'CHECKED_IN',
-        note: `Khách vãng lai: ${walkInCustomerName} - ${walkInCustomerPhone || 'Không có SĐT'}`
+        note: `Khách vãng lai: ${(walkInCustomerName && walkInCustomerName.trim()) || 'Khách vãng lai'} - ${rawPhone || ''}`
       });
     } else {
       if (!bookingId) {
