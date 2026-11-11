@@ -3,7 +3,7 @@ const Customer = require('../models/customer');
 const Staff = require('../models/staff');
 const { sendSuccess, sendError } = require('../utils/response');
 
-const PHONE_REGEX = /(0[3|5|7|8|9])+([0-9]{8})\b/;
+const PHONE_REGEX = /^0[35789][0-9]{8}$/;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const sanitizeCustomer = (customer) => ({
