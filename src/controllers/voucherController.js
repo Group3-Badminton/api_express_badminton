@@ -2,10 +2,6 @@ const voucherService = require('../services/voucherService');
 const { sendSuccess, sendError } = require('../utils/response');
 
 class VoucherController {
-  /**
-   * UC-15.1 & UC-15.6: Xem danh sách voucher & Tìm kiếm/lọc
-   * Actor: Staff, Admin
-   */
   async getVouchers(req, res) {
     try {
       const result = await voucherService.getVouchers(req.query);
@@ -15,10 +11,6 @@ class VoucherController {
     }
   }
 
-  /**
-   * UC-15.2: Xem chi tiết voucher
-   * Actor: Staff, Admin
-   */
   async getVoucherById(req, res) {
     try {
       const voucher = await voucherService.getVoucherById(req.params.id);
@@ -28,10 +20,6 @@ class VoucherController {
     }
   }
 
-  /**
-   * UC-15.3: Tạo voucher mới
-   * Actor: Admin
-   */
   async createVoucher(req, res) {
     try {
       const adminUserId = req.user?._id || req.user?.id || req.user?.userId;
@@ -42,10 +30,6 @@ class VoucherController {
     }
   }
 
-  /**
-   * UC-15.4: Cập nhật voucher
-   * Actor: Admin
-   */
   async updateVoucher(req, res) {
     try {
       const voucher = await voucherService.updateVoucher(req.params.id, req.body);
@@ -55,10 +39,6 @@ class VoucherController {
     }
   }
 
-  /**
-   * UC-15.5: Vô hiệu hóa voucher
-   * Actor: Admin
-   */
   async deactivateVoucher(req, res) {
     try {
       const voucher = await voucherService.deactivateVoucher(req.params.id);
@@ -68,10 +48,6 @@ class VoucherController {
     }
   }
 
-  /**
-   * Kích hoạt lại voucher
-   * Actor: Admin
-   */
   async activateVoucher(req, res) {
     try {
       const voucher = await voucherService.activateVoucher(req.params.id);
