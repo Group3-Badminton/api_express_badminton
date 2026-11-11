@@ -1016,52 +1016,45 @@ class BookingService {
     });
     // Rút trích danh sách khoảng giờ đã đặt (startTime - endTime) để client dùng trực tiếp
     const bookedRanges = [];
+    const isStaffOrAdmin =
+      currentUser?.role === "ADMIN" || currentUser?.role === "STAFF";
+
     activeBookings.forEach((b) => {
       if (Array.isArray(b.items) && b.items.length > 0) {
         b.items.forEach((item) => {
           if (item.status === "CANCELLED") return;
-          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
+          const itemCourtId =
+            item.courtId?._id?.toString() || item.courtId?.toString();
           const itemDate = new Date(item.bookingDate || b.bookingDate);
-          if (itemCourtId === courtId.toString() && itemDate >= startOfDay && itemDate <= endOfDay) {
-            if (item.startTime && item.endTime) {
-              bookedRanges.push({ startTime: item.startTime, endTime: item.endTime, bookingCode: b.bookingCode });
-            }
+          if (
+            itemCourtId === courtId.toString() &&
+            itemDate >= startOfDay &&
+            itemDate <= endOfDay &&
+            item.startTime &&
+            item.endTime
+          ) {
+            const range = {
+              startTime: item.startTime,
+              endTime: item.endTime,
+              status: item.status || b.status,
+            };
+            if (isStaffOrAdmin) range.bookingCode = b.bookingCode;
+            bookedRanges.push(range);
           }
         });
       } else {
         const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
         if (bCourtId === courtId.toString() && b.startTime && b.endTime) {
-          bookedRanges.push({ startTime: b.startTime, endTime: b.endTime, bookingCode: b.bookingCode });
+          const range = {
+            startTime: b.startTime,
+            endTime: b.endTime,
+            status: b.status,
+          };
+          if (isStaffOrAdmin) range.bookingCode = b.bookingCode;
+          bookedRanges.push(range);
         }
       }
     });
-
-    const bookedRanges = [];
-    for (const b of activeBookings) {
-      if (Array.isArray(b.items) && b.items.length > 0) {
-        for (const item of b.items) {
-          const itemCourtId = item.courtId?._id?.toString() || item.courtId?.toString();
-          if (item.status !== "CANCELLED" && itemCourtId === courtId.toString()) {
-            bookedRanges.push({
-              startTime: item.startTime,
-              endTime: item.endTime,
-              bookingCode: b.bookingCode,
-              status: item.status || b.status
-            });
-          }
-        }
-      } else {
-        const bCourtId = b.courtId?._id?.toString() || b.courtId?.toString();
-        if (bCourtId === courtId.toString()) {
-          bookedRanges.push({
-            startTime: b.startTime,
-            endTime: b.endTime,
-            bookingCode: b.bookingCode,
-            status: b.status
-          });
-        }
-      }
-    }
 
     return {
       court: {
@@ -1766,7 +1759,7 @@ class BookingService {
           const newUserData = {
             fullName: customerName?.trim() || "Khách vãng lai",
             phone: cleanPhone,
-            password: "guest_no_login_needed",
+            password: null,
             role: "CUSTOMER",
             status: "ACTIVE",
           };

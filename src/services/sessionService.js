@@ -426,7 +426,7 @@ class SessionService {
             phone: effectivePhone,
             role: 'CUSTOMER',
             status: 'ACTIVE',
-            password: 'WALK_IN_GUEST'
+            password: null
           });
         } catch (err) {
           if (err.code === 11000) {
