@@ -22,25 +22,17 @@ const escapeRegex = (string) => {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 };
 
-/**
- * UC-6.1 — View Customer List & UC-6.5 — Search/Filter Customer
- * Primary Actor: Staff, Admin (ACTIVE)
- * Business Rule: BR-02, BR-38
- */
 exports.getCustomers = async (req, res) => {
   try {
     const { search, status, page, limit } = req.query;
     const query = {};
-
-    // 1. Lọc theo trạng thái
+    
     if (status !== undefined && status !== '') {
       const cleanStatus = status.trim().toUpperCase();
       if (cleanStatus !== 'ALL') {
         query.status = cleanStatus;
       }
     }
-
-    // 2. Tìm kiếm theo Tên hoặc Số điện thoại (Partial match - BR-38)
     if (search !== undefined && search.trim() !== '') {
       const escaped = escapeRegex(search.trim());
       query.$or = [
@@ -49,7 +41,6 @@ exports.getCustomers = async (req, res) => {
       ];
     }
 
-    // 3. Phân trang Server-side (hỗ trợ page & limit)
     if (page !== undefined || limit !== undefined) {
       const pageNum = Math.max(1, parseInt(page, 10) || 1);
       const limitNum = Math.max(1, Math.min(100, parseInt(limit, 10) || 10));
@@ -80,7 +71,6 @@ exports.getCustomers = async (req, res) => {
       );
     }
 
-    // Trường hợp không truyền page/limit (tương thích ngược)
     const customers = await Customer.find(query)
       .select('_id fullName email phone role status password lockReason createdAt updatedAt')
       .sort({ createdAt: -1 });
@@ -91,9 +81,6 @@ exports.getCustomers = async (req, res) => {
   }
 };
 
-/**
- * Lấy chi tiết thông tin một khách hàng
- */
 exports.getCustomerById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -114,12 +101,6 @@ exports.getCustomerById = async (req, res) => {
   }
 };
 
-/**
- * UC-6.2 — Create Customer
- * Primary Actor: Staff, Admin (ACTIVE)
- * Quy tắc: Tạo khách hàng tại quầy/điện thoại, không tạo mật khẩu đăng nhập (POST-3).
- * Business Rule: BR-02, BR-04 (Số điện thoại là duy nhất).
- */
 exports.createCustomer = async (req, res) => {
   try {
     const { fullName, phone, email } = req.body || {};
@@ -127,24 +108,19 @@ exports.createCustomer = async (req, res) => {
     const cleanFullName = typeof fullName === 'string' ? fullName.trim() : '';
     const cleanPhone = typeof phone === 'string' ? phone.trim() : '';
 
-    // E1: Kiểm tra trường bắt buộc
     if (!cleanFullName || !cleanPhone) {
       return sendError(res, 'Họ và tên cùng Số điện thoại là bắt buộc.', 400);
     }
 
-    // E2: Kiểm tra định dạng số điện thoại VN (10 chữ số)
     if (!PHONE_REGEX.test(cleanPhone)) {
       return sendError(res, 'Số điện thoại không đúng định dạng hợp lệ (10 chữ số, đầu số 03, 05, 07, 08, 09)!', 400);
     }
-
-    // E3: Kiểm tra Số điện thoại đã được đăng ký chưa (BR-04)
     const existingPhoneInCust = await Customer.findOne({ phone: cleanPhone });
     const existingPhoneInStaff = await Staff.findOne({ phone: cleanPhone });
     if (existingPhoneInCust || existingPhoneInStaff) {
       return sendError(res, 'Số điện thoại này đã được đăng ký trong hệ thống!', 409);
     }
 
-    // Kiểm tra Email nếu có cung cấp
     let cleanEmail = null;
     if (email && typeof email === 'string' && email.trim()) {
       cleanEmail = email.trim().toLowerCase();
@@ -157,7 +133,6 @@ exports.createCustomer = async (req, res) => {
         return sendError(res, 'Địa chỉ Email này đã được sử dụng bởi tài khoản khác!', 409);
       }
     }
-    // Tạo bản ghi khách hàng
     const newCustomer = await Customer.create({
       fullName: cleanFullName,
       phone: cleanPhone,
@@ -176,11 +151,6 @@ exports.createCustomer = async (req, res) => {
   }
 };
 
-/**
- * UC-6.3 — Update Customer
- * Primary Actor: Staff, Admin (ACTIVE)
- * Business Rule: BR-02, BR-04
- */
 exports.updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -206,7 +176,6 @@ exports.updateCustomer = async (req, res) => {
       return sendError(res, 'Số điện thoại không đúng định dạng hợp lệ (10 chữ số)!', 400);
     }
 
-    // Kiểm tra trùng SĐT nếu có thay đổi
     if (cleanPhone !== customer.phone) {
       const existingPhoneCust = await Customer.findOne({ phone: cleanPhone, _id: { $ne: id } });
       const existingPhoneStaff = await Staff.findOne({ phone: cleanPhone });
@@ -215,7 +184,6 @@ exports.updateCustomer = async (req, res) => {
       }
     }
 
-    // Kiểm tra trùng Email nếu có cung cấp
     let cleanEmail = customer.email || null;
     if (email !== undefined) {
       const emailInput = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -249,11 +217,6 @@ exports.updateCustomer = async (req, res) => {
   }
 };
 
-/**
- * UC-6.4 — Deactivate Customer (Soft Delete)
- * Primary Actor: Staff, Admin (ACTIVE)
- * Business Rule: BR-06, BR-40 (Bảo toàn lịch sử giao dịch)
- */
 exports.deactivateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
@@ -279,9 +242,6 @@ exports.deactivateCustomer = async (req, res) => {
   }
 };
 
-/**
- * Kích hoạt lại khách hàng (Activate Customer)
- */
 exports.activateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
